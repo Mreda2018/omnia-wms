@@ -125,8 +125,9 @@ input:focus,select:focus,textarea:focus{border-color:var(--g);background:var(--w
 .tab:hover{color:var(--dark);}
 .tab.active{background:var(--g);color:#fff;}
 /* ALERTS */
-.al{border-radius:9px;padding:10px 14px;margin-bottom:10px;display:flex;
-  align-items:flex-start;gap:9px;font-size:12px;font-weight:600;}
+.al{border-radius:9px;padding:10px 14px;margin-bottom:10px;
+  font-size:12px;font-weight:600;line-height:1.6;}
+.al b{font-weight:800;}
 .al-a{background:#fff7ed;border-left:3px solid var(--amber);color:#92400e;}
 .al-r{background:#fff1f2;border-left:3px solid var(--red);color:#9f1239;}
 .al-g{background:#f0fdf4;border-left:3px solid var(--g);color:#065f46;}
@@ -4757,7 +4758,7 @@ function renderAccounting(){
     const totalOutputVAT=box1VAT+box3VAT;            // box 1 + reverse charge output portion
     const totalInputVAT=box9VAT+box3VAT;             // recoverable input incl. reverse charge
     const netVAT=totalOutputVAT-totalInputVAT;       // = box1VAT - box9VAT (RC nets out if recoverable)
-    body=`<div class="al al-b" style="margin-bottom:14px no-print">📋 <b>VAT 201 — FTA Return</b> for ${fD(acctFrom)} → ${fD(acctTo)}. Figures map directly to the boxes on the EmaraTax VAT 201 form. <b>Imports use the reverse-charge mechanism (Box 3)</b> — VAT is self-accounted and recovered in the same return. Confirm final figures with your accountant before filing.</div>
+    body=`<div class="al al-b no-print" style="margin-bottom:14px">📋 <b>VAT 201 — FTA Return</b> for ${fD(acctFrom)} → ${fD(acctTo)}. Figures map directly to the boxes on the EmaraTax VAT 201 form. <b>Imports use the reverse-charge mechanism (Box 3)</b> — VAT is self-accounted and recovered in the same return. Confirm final figures with your accountant before filing.</div>
     <div class="kg" style="margin-bottom:14px">
       <div class="kpi" style="border-top-color:#059669"><div class="ki">📤</div><div class="kl">Total Output VAT</div><div class="kv" style="font-size:16px;color:#059669">${fmtAED(totalOutputVAT)}</div></div>
       <div class="kpi" style="border-top-color:#1d4ed8"><div class="ki">📥</div><div class="kl">Total Recoverable Input VAT</div><div class="kv" style="font-size:16px;color:#1d4ed8">${fmtAED(totalInputVAT)}</div></div>
