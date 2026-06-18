@@ -272,6 +272,7 @@ input:focus,select:focus,textarea:focus{border-color:var(--g);background:var(--w
     <div class="ni" id="nav-statement" onclick="go('statement')"><span class="ic">📑</span>Customer Statements</div>
     <div class="ni" id="nav-cash" onclick="go('cash')"><span class="ic">💰</span>Cash Management</div>
     <div class="ni" id="nav-suppliers" onclick="go('suppliers')"><span class="ic">🌍</span>Suppliers / Import</div>
+    <div class="ni" id="nav-expenses" onclick="go('expenses')"><span class="ic">💸</span>Expenses</div>
     <div class="ni" id="nav-finstate" onclick="go('finstate')"><span class="ic">🏦</span>Financial Statements</div>
     <div class="ni" id="nav-accounting" onclick="go('accounting')"><span class="ic">🧮</span>Accounting &amp; Tax</div>
     <div class="ns">Workflow</div>
@@ -453,9 +454,9 @@ let currentUser=null; // {email, name, role}
 const ROLES={
   admin:'all',
   inventory:['dashboard','in','out','transfer','adjust','log','rep-all','outrep','inrep','expiry','products','opening','locations','suppliers'],
-  sales:['dashboard','out','rep-all','outrep','invoices','customers','sales','returns','delivery','payments','statement','cash','approvals','einvoice'],
-  viewer:['dashboard','in','out','transfer','adjust','log','rep-all','outrep','inrep','expiry','products','opening','locations','invoices','customers','sales','returns','delivery','payments','statement','cash','suppliers','accounting','finstate','approvals','einvoice','audit'],
-  management:['dashboard','in','out','transfer','adjust','log','rep-all','outrep','inrep','expiry','products','opening','locations','invoices','customers','sales','returns','delivery','payments','statement','cash','suppliers','accounting','finstate','approvals','einvoice','audit'],
+  sales:['dashboard','out','rep-all','outrep','invoices','customers','sales','returns','delivery','payments','statement','cash','expenses','approvals','einvoice'],
+  viewer:['dashboard','in','out','transfer','adjust','log','rep-all','outrep','inrep','expiry','products','opening','locations','invoices','customers','sales','returns','delivery','payments','statement','cash','suppliers','expenses','accounting','finstate','approvals','einvoice','audit'],
+  management:['dashboard','in','out','transfer','adjust','log','rep-all','outrep','inrep','expiry','products','opening','locations','invoices','customers','sales','returns','delivery','payments','statement','cash','suppliers','expenses','accounting','finstate','approvals','einvoice','audit'],
 };
 const ROLE_LABELS={admin:'👑 Admin',management:'🛡️ Management',inventory:'📦 Inventory',sales:'🧾 Sales',viewer:'👁 Viewer (Read-only)',custom:'⚙ Custom'};
 function normRole(r){return r==='limited'?'sales':(r||'sales');}
@@ -503,7 +504,7 @@ async function doLogin(){
     logAction('LOGIN',email);
     try{updateUserUI();}catch(e){console.error('updateUserUI:',e);}
     resetIdleTimer();
-    try{await loadFromDB();await loadSalesFromDB();await loadReturnsFromDB();await loadDNFromDB();await loadApprovalsFromDB();await loadPaymentsFromDB();await loadPettyFromDB();await loadSupFromDB();await loadSupPayFromDB();}catch(e){console.error('loadFromDB:',e);load();load2();}
+    try{await loadFromDB();await loadSalesFromDB();await loadReturnsFromDB();await loadDNFromDB();await loadApprovalsFromDB();await loadPaymentsFromDB();await loadPettyFromDB();await loadSupFromDB();await loadSupPayFromDB();await loadExpFromDB();}catch(e){console.error('loadFromDB:',e);load();load2();}
     try{subscribeRealtime();}catch(e){console.error('realtime:',e);}
     try{setTimeout(checkBackupReminder,1500);}catch(e){}
     try{go('dashboard');}catch(e){console.error('go:',e);document.getElementById('content').innerHTML='<div style="padding:40px;text-align:center;color:red">Error: '+e.message+'</div>';}
@@ -851,6 +852,7 @@ const pageInfo={
   statement:['Customer Statements','Account ledger & outstanding balances'],
   cash:['Cash Management','Collected cash, petty cash & cash flow'],
   suppliers:['Suppliers / Import','Manage import suppliers & purchase orders (EUR/AED)'],
+  expenses:['Expenses','Business expenses by category with recoverable VAT'],
   finstate:['Financial Statements','Balance sheet, income statement & cash flow'],
   accounting:['Accounting & Tax','VAT return, payables, P&L & corporate tax'],
   approvals:['Approvals','Invoice edit/cancel approval requests'],
@@ -912,7 +914,7 @@ function render(){
   try{
     renderLocNav();
     if(typeof updateApprBadge==='function')updateApprBadge();
-    const map={dashboard:renderDashboard,in:renderIn,out:renderOut,transfer:renderTransfer,adjust:renderAdjust,log:renderLog,expiry:renderExpiry,products:renderProducts,opening:renderOpening,locations:renderLocations,invoices:renderInvoices,customers:renderCustomers,sales:renderSales,returns:renderReturns,delivery:renderDelivery,payments:renderPayments,statement:renderStatement,cash:renderCash,suppliers:renderSuppliers,accounting:renderAccounting,finstate:renderFinStatements,einvoice:renderEInvoiceQueue,approvals:renderApprovals,audit:renderAudit,users:renderUsers,outrep:renderOutReport,inrep:renderInReport};
+    const map={dashboard:renderDashboard,in:renderIn,out:renderOut,transfer:renderTransfer,adjust:renderAdjust,log:renderLog,expiry:renderExpiry,products:renderProducts,opening:renderOpening,locations:renderLocations,invoices:renderInvoices,customers:renderCustomers,sales:renderSales,returns:renderReturns,delivery:renderDelivery,payments:renderPayments,statement:renderStatement,cash:renderCash,suppliers:renderSuppliers,expenses:renderExpenses,accounting:renderAccounting,finstate:renderFinStatements,einvoice:renderEInvoiceQueue,approvals:renderApprovals,audit:renderAudit,users:renderUsers,outrep:renderOutReport,inrep:renderInReport};
     if(curPage.startsWith('rep-'))renderReport(curPage==='rep-all'?null:curPage.replace('rep-',''));
     else(map[curPage]||renderDashboard)();
     updateExpBadge();
@@ -1917,7 +1919,7 @@ function save2(){
   localStorage.setItem('wms_invoices',JSON.stringify(invoices));
 }
 function load2(){
-  customers=JSON.parse(localStorage.getItem('wms_customers')||'[]');loadRet();loadDN();loadAppr();loadPay();loadPetty();loadSup();loadSupPay();
+  customers=JSON.parse(localStorage.getItem('wms_customers')||'[]');loadRet();loadDN();loadAppr();loadPay();loadPetty();loadSup();loadExp();loadSupPay();
   invoices=JSON.parse(localStorage.getItem('wms_invoices')||'[]');
   auditLog=JSON.parse(localStorage.getItem('wms_audit')||'[]');
 }
@@ -2983,7 +2985,7 @@ function exportInRepCSV(){
 
 // ══ USERS MANAGEMENT (admin only) ══
 let usersList=[];
-const ALL_PAGES=[['dashboard','📊 Dashboard'],['in','📥 Stock In'],['out','📤 Stock Out'],['transfer','🔄 Transfer'],['adjust','⚖ Adjustment'],['log','📜 Movements Log'],['rep-all','📈 Stock Reports'],['outrep','📤 Stock Out Report'],['inrep','📥 Stock In Report'],['expiry','⏰ Expiry Report'],['products','📦 Products'],['opening','🔢 Opening Balances'],['locations','📍 Locations'],['invoices','🧾 Tax Invoices'],['customers','👥 Customers'],['sales','💰 Sales Report'],['returns','↩ Sales Returns'],['delivery','🚚 Delivery Notes'],['payments','💵 Payments'],['statement','📑 Customer Statements'],['cash','💰 Cash Management'],['suppliers','🌍 Suppliers / Import'],['accounting','🧮 Accounting & Tax'],['finstate','🏦 Financial Statements'],['einvoice','📋 E-Invoicing']];
+const ALL_PAGES=[['dashboard','📊 Dashboard'],['in','📥 Stock In'],['out','📤 Stock Out'],['transfer','🔄 Transfer'],['adjust','⚖ Adjustment'],['log','📜 Movements Log'],['rep-all','📈 Stock Reports'],['outrep','📤 Stock Out Report'],['inrep','📥 Stock In Report'],['expiry','⏰ Expiry Report'],['products','📦 Products'],['opening','🔢 Opening Balances'],['locations','📍 Locations'],['invoices','🧾 Tax Invoices'],['customers','👥 Customers'],['sales','💰 Sales Report'],['returns','↩ Sales Returns'],['delivery','🚚 Delivery Notes'],['payments','💵 Payments'],['statement','📑 Customer Statements'],['cash','💰 Cash Management'],['suppliers','🌍 Suppliers / Import'],['expenses','💸 Expenses'],['accounting','🧮 Accounting & Tax'],['finstate','🏦 Financial Statements'],['einvoice','📋 E-Invoicing']];
 async function refreshUsers(){
   if(SB&&!useLocal){
     try{
@@ -3495,7 +3497,7 @@ function backupAllData(){
     _meta:{app:'OMNIA WMS',version:1,exportedAt:new Date().toISOString(),exportedBy:currentUser?.name||'',counts:{}},
     locations:locs,products:products,openingBalances:openingBal,movements:movements,
     customers:customers,invoices:invoices,returns:(typeof returns!=='undefined'?returns:[]),
-    deliveries:(typeof deliveries!=='undefined'?deliveries:[]),payments:(typeof payments!=='undefined'?payments:[]),pettyCash:(typeof pettyCash!=='undefined'?pettyCash:[]),suppliers:(typeof suppliers!=='undefined'?suppliers:[]),supPurchases:(typeof supPurchases!=='undefined'?supPurchases:[]),supPayments:(typeof supPayments!=='undefined'?supPayments:[]),approvals:(typeof approvals!=='undefined'?approvals:[]),
+    deliveries:(typeof deliveries!=='undefined'?deliveries:[]),payments:(typeof payments!=='undefined'?payments:[]),pettyCash:(typeof pettyCash!=='undefined'?pettyCash:[]),expenses:(typeof expenses!=='undefined'?expenses:[]),suppliers:(typeof suppliers!=='undefined'?suppliers:[]),supPurchases:(typeof supPurchases!=='undefined'?supPurchases:[]),supPayments:(typeof supPayments!=='undefined'?supPayments:[]),approvals:(typeof approvals!=='undefined'?approvals:[]),
     auditLog:auditLog
   };
   dump._meta.counts={locations:locs.length,products:products.length,movements:movements.length,customers:customers.length,invoices:invoices.length,returns:dump.returns.length,deliveries:dump.deliveries.length};
@@ -3532,13 +3534,14 @@ async function restoreAllData(input){
     if(typeof deliveries!=='undefined')deliveries=dump.deliveries||[];
     if(typeof payments!=='undefined')payments=dump.payments||[];
     if(typeof pettyCash!=='undefined')pettyCash=dump.pettyCash||[];
+    if(typeof expenses!=='undefined')expenses=dump.expenses||[];
     if(typeof suppliers!=='undefined')suppliers=dump.suppliers||[];
     if(typeof supPurchases!=='undefined')supPurchases=dump.supPurchases||[];
     if(typeof supPayments!=='undefined')supPayments=dump.supPayments||[];
     if(typeof approvals!=='undefined')approvals=dump.approvals||[];
     auditLog=dump.auditLog||[];
     // Persist locally
-    save();save2();if(typeof saveRet==='function')saveRet();if(typeof saveDN==='function')saveDN();if(typeof savePay==='function')savePay();if(typeof savePetty==='function')savePetty();if(typeof saveSup==='function')saveSup();if(typeof saveSupPay==='function')saveSupPay();if(typeof saveAppr==='function')saveAppr();
+    save();save2();if(typeof saveRet==='function')saveRet();if(typeof saveDN==='function')saveDN();if(typeof savePay==='function')savePay();if(typeof savePetty==='function')savePetty();if(typeof saveExp==='function')saveExp();if(typeof saveSup==='function')saveSup();if(typeof saveSupPay==='function')saveSupPay();if(typeof saveAppr==='function')saveAppr();
     // Push to Supabase if online
     if(SB&&!useLocal){
       const okPush=confirm('Also upload this restored data to the online database (Supabase)?\n\nOK = upload to server (recommended)\nCancel = keep on this device only');
@@ -4703,8 +4706,12 @@ function printVAT201(){
   const importPos=pos.filter(p=>p.currency!=='AED');
   const importBase=importPos.reduce((a,p)=>a+(+p.totalAED||0),0);
   const box3VAT=importBase*VAT_RATE;
-  const box9Base=localPos.reduce((a,p)=>a+(+p.totalAED||0),0);
-  const box9VAT=box9Base*VAT_RATE/(1+VAT_RATE);
+  const box9BaseLocal=localPos.reduce((a,p)=>a+(+p.totalAED||0),0);
+  const box9VATLocal=box9BaseLocal*VAT_RATE/(1+VAT_RATE);
+  const expVatBase=(typeof expensesVatBase==='function')?expensesVatBase(acctFrom,acctTo):0;
+  const expInputVAT=(typeof expensesInputVAT==='function')?expensesInputVAT(acctFrom,acctTo):0;
+  const box9Base=box9BaseLocal+expVatBase;
+  const box9VAT=box9VATLocal+expInputVAT;
   const totalOutputVAT=box1VAT+box3VAT;
   const totalInputVAT=box9VAT+box3VAT;
   const netVAT=totalOutputVAT-totalInputVAT;
@@ -4765,8 +4772,13 @@ function renderAccounting(){
     const importBase=importPos.reduce((a,p)=>a+(+p.totalAED||0),0);
     const box3VAT=importBase*VAT_RATE; // reverse charge VAT (added to both output & input → net zero if fully recoverable)
     // Box 9: Standard-rated expenses (local purchases) recoverable input VAT (AED totals treated as gross)
-    const box9Base=localPos.reduce((a,p)=>a+(+p.totalAED||0),0);
-    const box9VAT=box9Base*VAT_RATE/(1+VAT_RATE);
+    const box9BaseLocal=localPos.reduce((a,p)=>a+(+p.totalAED||0),0);
+    const box9VATLocal=box9BaseLocal*VAT_RATE/(1+VAT_RATE);
+    // Expenses with recoverable VAT (links to Expenses module)
+    const expVatBase=(typeof expensesVatBase==='function')?expensesVatBase(acctFrom,acctTo):0;
+    const expInputVAT=(typeof expensesInputVAT==='function')?expensesInputVAT(acctFrom,acctTo):0;
+    const box9Base=box9BaseLocal+expVatBase;
+    const box9VAT=box9VATLocal+expInputVAT;
     // Totals
     const totalOutputVAT=box1VAT+box3VAT;            // box 1 + reverse charge output portion
     const totalInputVAT=box9VAT+box3VAT;             // recoverable input incl. reverse charge
@@ -4843,7 +4855,7 @@ function renderAccounting(){
     cogs=0;inv.forEach(i=>(i.items||[]).forEach(it=>{const p=pm[it.sku];if(p){const pcs=it.unit==='case'?(it.qty*(p.ppc||1)):it.qty;cogs+=(+p.cost||0)*pcs;}}));
     const grossProfit=revenue-cogs;
     // expenses: petty cash out + (optionally) other
-    const expenses=(typeof pettyCash!=='undefined'?pettyCash:[]).filter(e=>e.type==='out'&&inAcct(e.date)).reduce((a,e)=>a+e.amount,0);
+    const pettyExp=(typeof pettyCash!=='undefined'?pettyCash:[]).filter(e=>e.type==='out'&&inAcct(e.date)).reduce((a,e)=>a+e.amount,0);const expModule=(typeof expensesNet==='function')?expensesNet(acctFrom,acctTo):0;const expenses=pettyExp+expModule;
     const netProfit=grossProfit-expenses;
     const margin=revenue?(grossProfit/revenue*100):0;
     body=`<div class="al al-b" style="margin-bottom:14px">📊 Simplified Profit & Loss for the period. Revenue and cost of goods come from invoices; expenses come from petty cash. This is a management view — final figures are set by your accountant.</div>
@@ -4857,7 +4869,7 @@ function renderAccounting(){
       <tr><td style="font-weight:700">Revenue (net of returns)</td><td class="r b">${fmtAED(revenue)}</td></tr>
       <tr><td style="padding-left:24px;color:var(--muted)">Less: Cost of Goods Sold</td><td class="r" style="color:#b45309">(${fmtAED(cogs)})</td></tr>
       <tr style="border-top:1px solid var(--border)"><td style="font-weight:700">Gross Profit</td><td class="r b" style="color:#1d4ed8">${fmtAED(grossProfit)} <span style="font-size:10px;color:var(--muted)">(${margin.toFixed(1)}%)</span></td></tr>
-      <tr><td style="padding-left:24px;color:var(--muted)">Less: Operating Expenses (petty cash)</td><td class="r" style="color:#b45309">(${fmtAED(expenses)})</td></tr>
+      <tr><td style="padding-left:24px;color:var(--muted)">Less: Operating Expenses</td><td class="r" style="color:#b45309">(${fmtAED(expenses)})</td></tr>
       <tr class="tfoot"><td class="b">NET PROFIT</td><td class="r b" style="font-size:15px;color:${netProfit>=0?'#15803d':'#b91c1c'}">${fmtAED(netProfit)}</td></tr>
     </tbody></table></div></div>`;
   }
@@ -4869,7 +4881,7 @@ function renderAccounting(){
     const rets=(typeof returns!=='undefined'?returns:[]).filter(r=>!r.cancelled&&inAcct(r.date));
     const revenue=inv.reduce((a,i)=>a+(+i.subtotal||0),0)-rets.reduce((a,r)=>a+(+r.subtotal||0),0);
     const pm=prodMap();let cogs=0;inv.forEach(i=>(i.items||[]).forEach(it=>{const p=pm[it.sku];if(p){const pcs=it.unit==='case'?(it.qty*(p.ppc||1)):it.qty;cogs+=(+p.cost||0)*pcs;}}));
-    const expenses=(typeof pettyCash!=='undefined'?pettyCash:[]).filter(e=>e.type==='out'&&inAcct(e.date)).reduce((a,e)=>a+e.amount,0);
+    const pettyExp=(typeof pettyCash!=='undefined'?pettyCash:[]).filter(e=>e.type==='out'&&inAcct(e.date)).reduce((a,e)=>a+e.amount,0);const expModule=(typeof expensesNet==='function')?expensesNet(acctFrom,acctTo):0;const expenses=pettyExp+expModule;
     const netProfit=revenue-cogs-expenses;
     const THRESHOLD=375000;
     const taxable=Math.max(0,netProfit-THRESHOLD);
@@ -4973,7 +4985,7 @@ function renderFinStatements(){
   rets.forEach(r=>(r.items||[]).forEach(it=>{const p=products.find(x=>x.sku===it.sku);if(p){const u=(it.unit==='case'||it.unit==='cases')?(p.ppc||1):1;cogs-=(+it.qty||0)*u*(+p.cost||0);}}));
   const grossProfit=revenue-cogs;
   // Expenses (petty cash out)
-  const expenses=(typeof pettyCash!=='undefined'?pettyCash:[]).filter(e=>e.type==='out'&&inFin(e.date)).reduce((a,e)=>a+e.amount,0);
+  const pettyExp=(typeof pettyCash!=='undefined'?pettyCash:[]).filter(e=>e.type==='out'&&inFin(e.date)).reduce((a,e)=>a+e.amount,0);const expModule=(typeof expensesNet==='function')?expensesNet(finFrom,finTo):0;const expenses=pettyExp+expModule;
   const netProfit=grossProfit-expenses;
   // Assets
   const stockValue=inventoryValue();
@@ -5015,7 +5027,7 @@ function renderFinStatements(){
       ${row('Revenue (net of VAT)',revenue,{bold:true})}
       ${row('Less: Cost of Goods Sold',-cogs,{indent:true,color:'#b91c1c'})}
       ${row('Gross Profit',grossProfit,{bold:true,bg:'#f8fafc'})}
-      ${row('Less: Operating Expenses (petty cash)',-expenses,{indent:true,color:'#b91c1c'})}
+      ${row('Less: Operating Expenses',-expenses,{indent:true,color:'#b91c1c'})}
       <tr style="background:${netProfit>=0?'#f0fdf4':'#fef2f2'}"><td style="font-weight:800;font-size:13px">NET PROFIT</td><td class="r" style="font-weight:800;font-size:15px;color:${netProfit>=0?'#15803d':'#b91c1c'}">${fmtAED(netProfit)}</td></tr>
       <tr><td style="font-size:11px;color:var(--muted)">Gross margin</td><td class="r" style="font-size:11px;color:var(--muted)">${revenue?Math.round(grossProfit/revenue*100):0}%</td></tr>
       <tr><td style="font-size:11px;color:var(--muted)">Net margin</td><td class="r" style="font-size:11px;color:var(--muted)">${revenue?Math.round(netProfit/revenue*100):0}%</td></tr>
@@ -5037,6 +5049,139 @@ function renderFinStatements(){
 }
 function finThisYear(){const d=new Date();finFrom=new Date(d.getFullYear(),0,1).toISOString().split('T')[0];finTo=new Date(d.getFullYear(),11,31).toISOString().split('T')[0];render();}
 function finThisQuarter(){const d=new Date();const q=Math.floor(d.getMonth()/3);finFrom=new Date(d.getFullYear(),q*3,1).toISOString().split('T')[0];finTo=new Date(d.getFullYear(),q*3+3,0).toISOString().split('T')[0];render();}
+
+
+// ══════════ EXPENSES ══════════
+let expenses=[]; // {id,date,category,desc,vendor,gross,hasVat,vatAmount,net,method,ref,by,ts}
+let expFrom='',expTo='',expCatFilter='all';
+const EXP_CATS=['Rent','Salaries','Utilities','Telecom','Marketing','Shipping/Logistics','Customs/Clearing','Maintenance','Office Supplies','Fuel/Transport','Professional Fees','Bank Charges','Insurance','Subscriptions','Other'];
+function saveExp(){if(typeof DEMO_MODE!=='undefined'&&DEMO_MODE){demoSave();return;}localStorage.setItem('wms_expenses',JSON.stringify(expenses));}
+function loadExp(){expenses=JSON.parse(localStorage.getItem('wms_expenses')||'[]');}
+async function dbInsertExp(e){
+  if(!SB||useLocal){saveExp();return;}
+  const{error}=await SB.from('expenses').insert({id:e.id,date:e.date,category:e.category||null,description:e.desc||null,vendor:e.vendor||null,gross:e.gross,has_vat:!!e.hasVat,vat_amount:e.vatAmount,net:e.net,method:e.method||null,ref:e.ref||null,created_by:e.by||null,ts:e.ts});
+  if(error){console.error('expense insert:',error);alert('⚠ Could not save expense: '+error.message+'\nMake sure expenses_setup.sql has been run.');}
+}
+async function dbDelExp(id){if(!SB||useLocal){saveExp();return;}await SB.from('expenses').delete().eq('id',id);}
+async function loadExpFromDB(){
+  if(!SB)return;
+  try{const{data}=await SB.from('expenses').select('*').order('date',{ascending:false});
+    expenses=(data||[]).map(r=>({id:r.id,date:r.date,category:r.category||'',desc:r.description||'',vendor:r.vendor||'',gross:+r.gross||0,hasVat:!!r.has_vat,vatAmount:+r.vat_amount||0,net:+r.net||0,method:r.method||'',ref:r.ref||'',by:r.created_by||'',ts:r.ts||0}));
+  }catch(e){console.error('expenses load:',e);}
+}
+function ensureExpRange(){if(!expFrom){const d=new Date();expFrom=new Date(d.getFullYear(),d.getMonth(),1).toISOString().split('T')[0];expTo=new Date(d.getFullYear(),d.getMonth()+1,0).toISOString().split('T')[0];}}
+function inExp(date){return (!expFrom||date>=expFrom)&&(!expTo||date<=expTo);}
+// Recoverable input VAT from expenses in a date range (for VAT 201 Box 9)
+function expensesInputVAT(from,to){
+  return expenses.filter(e=>e.hasVat&&(!from||e.date>=from)&&(!to||e.date<=to)).reduce((a,e)=>a+(+e.vatAmount||0),0);
+}
+// Total expense NET (excl VAT) in range — for P&L / Income Statement
+function expensesNet(from,to){
+  return expenses.filter(e=>(!from||e.date>=from)&&(!to||e.date<=to)).reduce((a,e)=>a+(+e.net||0),0);
+}
+// Standard-rated expense base (net of recoverable expenses) for VAT 201 Box 9 amount
+function expensesVatBase(from,to){
+  return expenses.filter(e=>e.hasVat&&(!from||e.date>=from)&&(!to||e.date<=to)).reduce((a,e)=>a+(+e.net||0),0);
+}
+
+function calcExpVat(){
+  const gross=+document.getElementById('exp-gross').value||0;
+  const hasVat=document.getElementById('exp-hasvat').checked;
+  const vat=hasVat?gross*VAT_RATE/(1+VAT_RATE):0;
+  const net=gross-vat;
+  const el=document.getElementById('exp-breakdown');
+  if(el)el.innerHTML=hasVat
+    ? `Net: <b>${fmtAED(net)}</b> + VAT (recoverable): <b style="color:#1d4ed8">${fmtAED(vat)}</b>`
+    : `Net (no VAT): <b>${fmtAED(net)}</b>`;
+}
+
+function renderExpenses(){
+  ensureExpRange();
+  const list=expenses.filter(e=>inExp(e.date)&&(expCatFilter==='all'||e.category===expCatFilter)).sort((a,b)=>b.ts-a.ts);
+  const totalGross=list.reduce((a,e)=>a+e.gross,0);
+  const totalNet=list.reduce((a,e)=>a+e.net,0);
+  const totalVat=list.reduce((a,e)=>a+(e.hasVat?e.vatAmount:0),0);
+  // by category
+  const byCat={};list.forEach(e=>{byCat[e.category||'Other']=(byCat[e.category||'Other']||0)+e.net;});
+
+  document.getElementById('content').innerHTML=`
+  <div class="al al-b" style="margin-bottom:14px">💼 Track all business expenses by category. Expenses with a tax invoice carry <b>recoverable input VAT</b> that flows into your <b>VAT 201 (Box 9)</b> and the net amount into your <b>Income Statement</b>.</div>
+  ${canEditSales()?`<div class="card" style="margin-bottom:14px"><div class="ch" style="background:#fef2f2;border-bottom-color:#fecaca;color:#991b1b">➕ Record Expense</div><div class="cb">
+    <div class="frow f3" style="margin-bottom:10px">
+      <div class="fg"><label>Date *</label><input type="date" id="exp-date" value="${TODAY}"/></div>
+      <div class="fg"><label>Category *</label><select id="exp-cat">${EXP_CATS.map(c=>`<option>${c}</option>`).join('')}</select></div>
+      <div class="fg"><label>Amount (gross, AED) *</label><input type="number" id="exp-gross" min="0" step="0.01" placeholder="0.00" oninput="calcExpVat()"/></div>
+    </div>
+    <div class="frow f3" style="margin-bottom:10px">
+      <div class="fg"><label>Vendor / Paid To</label><input id="exp-vendor" placeholder="e.g. DEWA, Etisalat"/></div>
+      <div class="fg"><label>Method</label><select id="exp-method"><option value="cash">💵 Cash</option><option value="bank">🏦 Bank</option><option value="card">💳 Card</option><option value="cheque">📝 Cheque</option></select></div>
+      <div class="fg"><label>Reference / Invoice No.</label><input id="exp-ref" placeholder="Supplier invoice #"/></div>
+    </div>
+    <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px;background:#eff6ff;border:1px solid #bfdbfe;border-radius:8px;padding:10px 12px">
+      <input type="checkbox" id="exp-hasvat" onchange="calcExpVat()" style="width:18px;height:18px;flex-shrink:0"/>
+      <label for="exp-hasvat" style="margin:0;font-size:12px;font-weight:600;color:#1e40af;cursor:pointer">This expense has a valid tax invoice with 5% VAT (recoverable input VAT)</label>
+    </div>
+    <div class="fg" style="margin-bottom:10px"><label>Description</label><input id="exp-desc" placeholder="What was this expense for?"/></div>
+    <div id="exp-breakdown" style="font-size:12px;color:var(--muted);margin-bottom:10px;padding:8px 12px;background:#f8fafc;border-radius:7px">Enter an amount to see the VAT breakdown</div>
+    <button class="btn bbl" style="background:#dc2626;color:#fff;padding:11px" onclick="saveExpense()">💾 Save Expense</button>
+    <div id="exp-msg" style="display:none;margin-top:8px;font-size:12px;font-weight:700;text-align:center"></div>
+  </div></div>`:''}
+  <div class="card" style="margin-bottom:14px"><div class="cb" style="padding:12px;display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end" class="no-print">
+    <div class="fg" style="margin:0"><label>From</label><input type="date" value="${expFrom}" onchange="expFrom=this.value;render()" style="width:140px"/></div>
+    <div class="fg" style="margin:0"><label>To</label><input type="date" value="${expTo}" onchange="expTo=this.value;render()" style="width:140px"/></div>
+    <div class="fg" style="margin:0"><label>Category</label><select onchange="expCatFilter=this.value;render()" style="width:auto"><option value="all">All</option>${EXP_CATS.map(c=>`<option ${expCatFilter===c?'selected':''}>${c}</option>`).join('')}</select></div>
+    <button class="btn bgh bsm" onclick="expThisMonth()">This Month</button>
+    <div style="flex:1"></div>
+    <button class="btn bb bsm" onclick="exportExpensesCSV()">📄 CSV</button>
+  </div></div>
+  <div class="kg" style="margin-bottom:14px">
+    <div class="kpi" style="border-top-color:#dc2626"><div class="ki">💸</div><div class="kl">Total Expenses (gross)</div><div class="kv" style="font-size:16px;color:#dc2626">${fmtAED(totalGross)}</div></div>
+    <div class="kpi" style="border-top-color:#b45309"><div class="ki">📊</div><div class="kl">Net (P&L impact)</div><div class="kv" style="font-size:16px;color:#b45309">${fmtAED(totalNet)}</div></div>
+    <div class="kpi" style="border-top-color:#1d4ed8"><div class="ki">📥</div><div class="kl">Recoverable VAT</div><div class="kv" style="font-size:16px;color:#1d4ed8">${fmtAED(totalVat)}</div></div>
+  </div>
+  <div class="card"><div class="ch" style="display:flex;justify-content:space-between"><span>Expenses (${list.length})</span></div>
+    ${list.length?`<div class="tw"><table><thead><tr><th>Date</th><th>Category</th><th>Vendor</th><th>Description</th><th>Method</th><th class="r">Net</th><th class="r">VAT</th><th class="r">Gross</th><th>By</th>${canEditSales()?'<th></th>':''}</tr></thead><tbody>
+      ${list.map(e=>`<tr>
+        <td style="font-size:11px">${fD(e.date)}</td>
+        <td><span class="tag" style="background:#fef2f2;color:#991b1b">${esc(e.category||'—')}</span></td>
+        <td style="font-size:11px">${esc(e.vendor||'—')}</td>
+        <td style="font-size:11px">${esc(e.desc||'—')}</td>
+        <td style="font-size:10px;color:var(--muted)">${esc(e.method||'—')}</td>
+        <td class="r">${fmtAED(e.net)}</td>
+        <td class="r" style="color:${e.hasVat?'#1d4ed8':'#cbd5e1'};font-size:11px">${e.hasVat?fmtAED(e.vatAmount):'—'}</td>
+        <td class="r b" style="color:#dc2626">${fmtAED(e.gross)}</td>
+        <td style="font-size:10px;color:var(--muted)">${esc(e.by||'—')}</td>
+        ${canEditSales()?`<td><button class="btn br bsm" onclick="delExpense('${e.id}')">✖</button></td>`:''}
+      </tr>`).join('')}
+      <tr class="tfoot"><td colspan="5" class="b">TOTAL</td><td class="r b">${fmtAED(totalNet)}</td><td class="r b" style="color:#1d4ed8">${fmtAED(totalVat)}</td><td class="r b" style="color:#dc2626">${fmtAED(totalGross)}</td><td colspan="${canEditSales()?2:1}"></td></tr>
+    </tbody></table></div>`:`<div class="cb" style="text-align:center;color:var(--muted);padding:30px">No expenses recorded in this period</div>`}
+  </div>
+  ${Object.keys(byCat).length?`<div class="card" style="margin-top:14px"><div class="ch">📊 Expenses by Category (net)</div><div class="tw"><table><thead><tr><th>Category</th><th class="r">Net Amount</th><th class="r">% of Total</th></tr></thead><tbody>
+    ${Object.entries(byCat).sort((a,b)=>b[1]-a[1]).map(([k,v])=>`<tr><td style="font-weight:600">${esc(k)}</td><td class="r b">${fmtAED(v)}</td><td class="r" style="font-size:11px;color:var(--muted)">${totalNet?Math.round(v/totalNet*100):0}%</td></tr>`).join('')}
+  </tbody></table></div></div>`:''}`;
+}
+function expThisMonth(){const d=new Date();expFrom=new Date(d.getFullYear(),d.getMonth(),1).toISOString().split('T')[0];expTo=new Date(d.getFullYear(),d.getMonth()+1,0).toISOString().split('T')[0];render();}
+async function saveExpense(){
+  const date=document.getElementById('exp-date').value;
+  const gross=+document.getElementById('exp-gross').value;
+  if(!date){msg('exp-msg','⚠ Select date',false);return;}
+  if(!gross||gross<=0){msg('exp-msg','⚠ Enter a valid amount',false);return;}
+  const hasVat=document.getElementById('exp-hasvat').checked;
+  const vatAmount=hasVat?+(gross*VAT_RATE/(1+VAT_RATE)).toFixed(2):0;
+  const net=+(gross-vatAmount).toFixed(2);
+  const e={id:uid(),date,category:document.getElementById('exp-cat').value,desc:document.getElementById('exp-desc').value.trim(),vendor:document.getElementById('exp-vendor').value.trim(),gross:+gross.toFixed(2),hasVat,vatAmount,net,method:document.getElementById('exp-method').value,ref:document.getElementById('exp-ref').value.trim(),by:currentUser?.name||'',ts:Date.now()};
+  expenses.push(e);await dbInsertExp(e);saveExp();
+  await logAction('EXPENSE_RECORDED',e.category+' — '+fmtAED(e.gross)+(hasVat?' (incl VAT '+fmtAED(vatAmount)+')':'')+(e.vendor?' — '+e.vendor:''));
+  msg('exp-msg','✅ Expense saved!',true);
+  setTimeout(()=>render(),600);
+}
+async function delExpense(id){const e=expenses.find(x=>x.id===id);if(!e)return;if(!confirm('Delete this expense?'))return;expenses=expenses.filter(x=>x.id!==id);await dbDelExp(id);saveExp();await logAction('EXPENSE_DELETED',e.category+' — '+fmtAED(e.gross));render();}
+function exportExpensesCSV(){
+  ensureExpRange();
+  const rows=expenses.filter(e=>inExp(e.date)&&(expCatFilter==='all'||e.category===expCatFilter)).sort((a,b)=>a.ts-b.ts).map(e=>[e.date,e.category,e.vendor||'',e.desc||'',e.method||'',e.net.toFixed(2),e.hasVat?e.vatAmount.toFixed(2):'0.00',e.gross.toFixed(2),e.ref||'',e.by||'']);
+  dlCSV(['Date','Category','Vendor','Description','Method','Net','VAT','Gross','Reference','By'],rows,'OMNIA_Expenses_'+expFrom+'_to_'+expTo);
+  logAction('EXPENSES_EXPORTED',rows.length+' rows');
+}
 
 // ── AUTO-LOGOUT AFTER IDLE (5 minutes) ──
 let idleTimer=null;
@@ -5097,7 +5242,7 @@ document.addEventListener('DOMContentLoaded',()=>{injectLogos();startClock();sta
         if(savedUser&&savedUser.email!=='offline'){
           currentUser=savedUser;
           updateUserUI();
-          await loadFromDB();await loadSalesFromDB();await loadReturnsFromDB();await loadDNFromDB();await loadApprovalsFromDB();await loadPaymentsFromDB();await loadPettyFromDB();await loadSupFromDB();await loadSupPayFromDB();subscribeRealtime();go('dashboard');
+          await loadFromDB();await loadSalesFromDB();await loadReturnsFromDB();await loadDNFromDB();await loadApprovalsFromDB();await loadPaymentsFromDB();await loadPettyFromDB();await loadSupFromDB();await loadSupPayFromDB();await loadExpFromDB();subscribeRealtime();go('dashboard');
           return;
         }
       }
