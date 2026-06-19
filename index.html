@@ -236,6 +236,7 @@ input:focus,select:focus,textarea:focus{border-color:var(--g);background:var(--w
     </div>
     <div id="login-err" style="color:#ef4444;font-size:12px;margin-bottom:6px;display:none"></div>
     <button onclick="doLogin()" style="width:100%;margin-top:12px;padding:12px;background:#4DB78C;color:#fff;border:none;border-radius:10px;font-size:14px;font-weight:700;cursor:pointer;font-family:inherit">🔐 Log In</button>
+    <div style="margin-top:10px;text-align:center;font-size:10.5px;color:#94a3b8;background:#f8fafc;border-radius:8px;padding:7px 10px;line-height:1.4">🔒 For your security, the account locks after <b style="color:#64748b">3 failed attempts</b>. Contact your administrator to unlock.</div>
     <div style="margin-top:16px;text-align:center;font-size:8.5px;color:#c2cad4;letter-spacing:.4px;opacity:.75">Designed &amp; Developed by <span style="color:#9fc5b5;font-weight:600">Mohamed Reda</span></div>
   </div>
 </div>
@@ -453,21 +454,75 @@ function subscribeRealtime(){
 
 // ── USER AUTH ──────────────────────────────────────
 let currentUser=null; // {email, name, role}
-const ROLES={
+const DEFAULT_ROLES={
   admin:'all',
+  // 📦 المخزن — Inventory: stock operations + reports + products only
   inventory:['dashboard','in','out','transfer','adjust','log','rep-all','outrep','inrep','expiry','products','opening','locations','suppliers'],
-  sales:['dashboard','out','rep-all','outrep','invoices','customers','sales','returns','delivery','payments','statement','cash','expenses','approvals','einvoice'],
-  viewer:['dashboard','in','out','transfer','adjust','log','rep-all','outrep','inrep','expiry','products','opening','locations','invoices','customers','sales','returns','delivery','payments','statement','cash','suppliers','expenses','assets','accounting','bookkeeping','finstate','approvals','einvoice','audit'],
+  // 🧾 المبيعات — Sales: invoices, customers, payments, returns, delivery
+  sales:['dashboard','out','rep-all','outrep','invoices','customers','sales','returns','delivery','payments','statement','expenses','approvals','einvoice'],
+  // 🧮 الحسابات — Accountant: all financial/accounting modules + read sales
+  accountant:['dashboard','rep-all','invoices','customers','sales','payments','statement','cash','suppliers','expenses','assets','accounting','bookkeeping','finstate','einvoice'],
+  // 🛡️ الإدارة — Management: everything except user management
   management:['dashboard','in','out','transfer','adjust','log','rep-all','outrep','inrep','expiry','products','opening','locations','invoices','customers','sales','returns','delivery','payments','statement','cash','suppliers','expenses','assets','accounting','bookkeeping','finstate','approvals','einvoice','audit'],
+  // 👁 Viewer — read-only of everything except users
+  viewer:['dashboard','in','out','transfer','adjust','log','rep-all','outrep','inrep','expiry','products','opening','locations','invoices','customers','sales','returns','delivery','payments','statement','cash','suppliers','expenses','assets','accounting','bookkeeping','finstate','approvals','einvoice','audit'],
 };
-const ROLE_LABELS={admin:'👑 Admin',management:'🛡️ Management',inventory:'📦 Inventory',sales:'🧾 Sales',viewer:'👁 Viewer (Read-only)',custom:'⚙ Custom'};
+// Admin-customised role pages loaded from Supabase (overrides defaults). admin always = 'all'.
+let roleOverrides={};
+// Effective ROLES = defaults merged with admin overrides (admin stays 'all' always)
+function ROLES_get(role){
+  if(role==='admin')return'all';
+  if(roleOverrides[role])return roleOverrides[role];
+  return DEFAULT_ROLES[role]||DEFAULT_ROLES.sales;
+}
+// Back-compat: some code reads ROLES[x] directly
+const ROLES=new Proxy({},{get(t,role){return ROLES_get(role);},has(t,role){return role in DEFAULT_ROLES||role in roleOverrides;}});
+const ROLE_LABELS={admin:'👑 Admin',management:'🛡️ Management',accountant:'🧮 Accountant',inventory:'📦 Inventory',sales:'🧾 Sales',viewer:'👁 Viewer (Read-only)',custom:'⚙ Custom'};
+const EDITABLE_ROLES=['inventory','sales','accountant','management','viewer'];
+function saveRoleOverrides(){if(typeof DEMO_MODE!=='undefined'&&DEMO_MODE)return;localStorage.setItem('wms_role_overrides',JSON.stringify(roleOverrides));}
+function loadRoleOverrides(){try{roleOverrides=JSON.parse(localStorage.getItem('wms_role_overrides')||'{}');}catch(e){roleOverrides={};}}
+async function loadRoleOverridesFromDB(){
+  if(!SB)return;
+  try{const{data}=await SB.from('role_permissions').select('*');
+    roleOverrides={};(data||[]).forEach(r=>{if(r.role&&Array.isArray(r.pages))roleOverrides[r.role]=r.pages;});
+    saveRoleOverrides();
+  }catch(e){console.error('role_permissions load:',e);}
+}
+async function saveRolePermission(role,pages){
+  roleOverrides[role]=pages;saveRoleOverrides();
+  if(SB&&!useLocal){
+    try{await SB.from('role_permissions').upsert({role,pages,updated_by:currentUser?.name||'',updated_at:new Date().toISOString()});}
+    catch(e){console.error('role_permissions save:',e);alert('⚠ Could not save to server: '+e.message+'\nMake sure role_permissions_setup.sql has been run.');}
+  }
+  await logAction('ROLE_PERMISSIONS_UPDATED',role+' → '+pages.length+' pages');
+}
+async function resetRolePermission(role){
+  delete roleOverrides[role];saveRoleOverrides();
+  if(SB&&!useLocal){try{await SB.from('role_permissions').delete().eq('role',role);}catch(e){console.error(e);}}
+  await logAction('ROLE_PERMISSIONS_RESET',role+' → defaults');
+}
+async function saveRoleEdit(role){
+  const boxes=document.querySelectorAll('.rp-cb');
+  const pages=['dashboard']; // dashboard always included
+  boxes.forEach(cb=>{if(cb.checked&&cb.value!=='dashboard')pages.push(cb.value);});
+  await saveRolePermission(role,pages);
+  msg('rp-msg','✅ Saved! '+ROLE_LABELS[role]+' can now access '+pages.length+' pages. Users with this role will see the change on next login/refresh.',true);
+  if(currentUser&&normRole(currentUser.role)===role){try{updateUserUI();}catch(e){}}
+  setTimeout(()=>render(),900);
+}
+async function resetRole(role){
+  if(!confirm('Reset '+(ROLE_LABELS[role]||role)+' to default permissions? Your customisations for this role will be removed.'))return;
+  await resetRolePermission(role);
+  if(currentUser&&normRole(currentUser.role)===role){try{updateUserUI();}catch(e){}}
+  render();
+}
 function normRole(r){return r==='limited'?'sales':(r||'sales');}
 function rolePages(u){
   if(!u)return'all';
   const r=normRole(u.role);
   if(r==='admin')return'all';
   if(r==='custom')return(u.perms&&u.perms.pages)||[];
-  return ROLES[r]||ROLES.sales;
+  return ROLES_get(r);
 }
 function canEdit(){ // inventory edit rights
   if(!currentUser)return true;
@@ -514,7 +569,7 @@ async function doLogin(){
     logAction('LOGIN',email);
     try{updateUserUI();}catch(e){console.error('updateUserUI:',e);}
     resetIdleTimer();
-    try{await loadFromDB();await loadSalesFromDB();await loadReturnsFromDB();await loadDNFromDB();await loadApprovalsFromDB();await loadPaymentsFromDB();await loadPettyFromDB();await loadSupFromDB();await loadSupPayFromDB();await loadExpFromDB();await loadAssetsFromDB();}catch(e){console.error('loadFromDB:',e);load();load2();}
+    try{await loadFromDB();await loadSalesFromDB();await loadReturnsFromDB();await loadDNFromDB();await loadApprovalsFromDB();await loadPaymentsFromDB();await loadPettyFromDB();await loadSupFromDB();await loadSupPayFromDB();await loadExpFromDB();await loadAssetsFromDB();await loadRoleOverridesFromDB();}catch(e){console.error('loadFromDB:',e);load();load2();}
     try{subscribeRealtime();}catch(e){console.error('realtime:',e);}
     try{setTimeout(checkBackupReminder,1500);}catch(e){}
     try{go('dashboard');}catch(e){console.error('go:',e);document.getElementById('content').innerHTML='<div style="padding:40px;text-align:center;color:red">Error: '+e.message+'</div>';}
@@ -595,6 +650,7 @@ function updateUserUI(){
   // Hide nav items based on role
   document.querySelectorAll('.ni[id^="nav-"]').forEach(el=>{
     const page=el.id.replace('nav-','');
+    if(page.startsWith('rep-')&&page!=='rep-all'){return;} // location reports handled separately
     el.style.display=canAccess(page)?'':'none';
   });
   document.querySelectorAll('.bni[id^="bni-"]').forEach(el=>{
@@ -602,6 +658,26 @@ function updateUserUI(){
     if(page!=='menu')el.style.display=canAccess(page)?'':'none';
   });
   renderLocNav();
+  // Hide section headers (.ns) when ALL items under them are hidden
+  const nav=document.querySelector('.sb-nav');
+  if(nav){
+    const kids=Array.from(nav.children);
+    kids.forEach((el,i)=>{
+      if(!el.classList.contains('ns'))return;
+      // look ahead until next .ns — is any item visible?
+      let anyVisible=false;
+      for(let j=i+1;j<kids.length;j++){
+        if(kids[j].classList.contains('ns'))break;
+        const isItem=kids[j].classList.contains('ni')||kids[j].id==='loc-nav-slot';
+        if(isItem){
+          // loc-nav-slot: check its children
+          if(kids[j].id==='loc-nav-slot'){if(kids[j].children.length>0)anyVisible=true;}
+          else if(kids[j].style.display!=='none')anyVisible=true;
+        }
+      }
+      el.style.display=anyVisible?'':'none';
+    });
+  }
 }
 
 function renderLocNav(){
@@ -736,15 +812,11 @@ const prodMap=()=>Object.fromEntries(products.map(p=>[p.sku,p]));
 // ── STOCK CALCULATIONS ───────────────────────────
 function getPPC(sku){return products.find(p=>p.sku===sku)?.ppc||1;}
 function getOB(locId,sku){const r=openingBal.find(o=>o.locId===locId&&o.sku===sku);return r?(r.cases*getPPC(sku)+(+r.pcs||0)):0;}
-// If a product/location has any IN or TF-in movement (i.e. real batches were added),
-// the Opening Balance is IGNORED to avoid double counting. Batches replace the OB.
-function hasBatchMovements(locId,sku){return movements.some(m=>m.sku===sku&&((m.type==='IN'&&m.locId===locId)||(m.type==='TF'&&m.toLoc===locId)));}
-function effectiveOB(locId,sku){return hasBatchMovements(locId,sku)?0:getOB(locId,sku);}
 function getIn(locId,sku){return movements.filter(m=>m.sku===sku&&m.type==='IN'&&m.locId===locId).reduce((a,m)=>a+(m.cases*getPPC(sku))+(+m.pcs||0),0);}
 function getOut(locId,sku){return movements.filter(m=>m.sku===sku&&m.locId===locId&&(m.type==='OUT'||(m.type==='TF'&&m.fromLoc===locId))).reduce((a,m)=>a+(m.cases*getPPC(sku))+(+m.pcs||0),0);}
 function getTfIn(locId,sku){return movements.filter(m=>m.sku===sku&&m.type==='TF'&&m.toLoc===locId).reduce((a,m)=>a+(m.cases*getPPC(sku))+(+m.pcs||0),0);}
 function getAdj(locId,sku){return movements.filter(m=>m.sku===sku&&m.type==='ADJ'&&m.locId===locId).reduce((a,m)=>a+(m.adjQty||0),0);}
-function getClose(locId,sku){return effectiveOB(locId,sku)+getIn(locId,sku)+getTfIn(locId,sku)-getOut(locId,sku)+getAdj(locId,sku);}
+function getClose(locId,sku){return getOB(locId,sku)+getIn(locId,sku)+getTfIn(locId,sku)-getOut(locId,sku)+getAdj(locId,sku);}
 function cpStr(pcs,ppc){const c=Math.floor(Math.abs(pcs)/ppc),p=Math.abs(pcs)%ppc;return(pcs<0?'-':'')+c+'cs '+p+'pcs';}
 function cpStrFmt(pcs,ppc){const c=Math.floor(pcs/ppc),p=pcs%ppc;return`<span style="font-weight:700">${c}</span><small style="color:var(--muted)"> cs</small> <span style="font-weight:700">${p}</span><small style="color:var(--muted)"> pcs</small>`;}
 
@@ -764,7 +836,7 @@ function getBatchStock(locId,sku){
     if(left>0){add('',0);buckets['__none__'].qty-=left;}
   };
   const p=prodMap()[sku];
-  const ob=effectiveOB(locId,sku);
+  const ob=getOB(locId,sku);
   if(ob>0)add(p?.expiry||'',ob);
   const movs=movements.filter(m=>m.sku===sku).slice().sort((a,b)=>(a.ts||0)-(b.ts||0)||(a.date<b.date?-1:a.date>b.date?1:0));
   for(const m of movs){
@@ -811,40 +883,13 @@ function openBatchModal(sku){
   document.getElementById('modal-title').textContent='📅 Batches — '+p.name;
   document.getElementById('modal-body').innerHTML=`
     <div style="font-size:11px;color:var(--muted);margin-bottom:10px">SKU: <b class="mono">${esc(sku)}</b> · Total remaining: <b style="color:var(--gd)">${totalAll.toLocaleString()} pcs</b> across all batches & locations</div>
-    ${rowsHtml?`<div style="max-height:250px;overflow-y:auto;border:1px solid var(--border);border-radius:9px;margin-bottom:14px"><table style="width:100%;border-collapse:collapse;font-size:12px">
+    ${rowsHtml?`<div style="max-height:300px;overflow-y:auto;border:1px solid var(--border);border-radius:9px;margin-bottom:14px"><table style="width:100%;border-collapse:collapse;font-size:12px">
       <thead><tr style="background:#f8fafc"><th style="padding:7px 6px;text-align:left;font-size:10px">Location</th><th style="padding:7px 6px;text-align:left;font-size:10px">Expiry</th><th style="padding:7px 6px;text-align:left;font-size:10px">Status</th><th style="padding:7px 6px;text-align:left;font-size:10px">Batch</th><th style="padding:7px 6px;text-align:right;font-size:10px">Remaining</th><th style="padding:7px 6px;text-align:right;font-size:10px">Cs+Pc</th><th></th></tr></thead>
       <tbody>${rowsHtml}</tbody></table></div>`
-    :'<div style="text-align:center;color:var(--muted);padding:16px;background:#f8fafc;border-radius:9px;margin-bottom:14px">No batches with remaining stock — add one below 👇</div>'}
-    ${canEdit()?`
-    <div style="border-top:2px solid var(--border);padding-top:12px">
-      <div style="font-weight:800;font-size:13px;margin-bottom:10px">➕ Add Batch — stock with its own expiry date</div>
-      <div class="frow f2">
-        <div class="fg"><label>Location *</label><select id="nb-loc">${locs.map(l=>`<option value="${l.id}">${l.icon} ${esc(l.name)}</option>`).join('')}</select></div>
-        <div class="fg"><label>📅 Expiry Date *</label><input type="date" id="nb-exp"/></div>
-      </div>
-      <div class="frow f3">
-        <div class="fg"><label>Batch No.</label><input id="nb-batch" placeholder="e.g. B2026-07"/></div>
-        <div class="fg"><label>Cases</label><input type="number" id="nb-cases" min="0" value="0"/></div>
-        <div class="fg"><label>Pieces</label><input type="number" id="nb-pcs" min="0" value="0"/></div>
-      </div>
-      <button class="btn bg bbl" onclick="saveNewBatch('${sku}')">➕ Add Batch</button>
-      <div id="nb-msg" style="display:none;margin-top:8px;font-size:12px;font-weight:700;text-align:center"></div>
-    </div>`:''}
-    <button class="btn bgh bbl" style="margin-top:12px" onclick="closeModal()">Close</button>`;
+    :'<div style="text-align:center;color:var(--muted);padding:16px;background:#f8fafc;border-radius:9px;margin-bottom:14px">No batches yet. Record <b>Stock In</b> with an expiry date to start batch tracking.</div>'}
+    <div class="al al-b" style="font-size:11px;margin-bottom:12px">ℹ️ This is a <b>view of your stock grouped by expiry date</b>. To add stock, use <b>📥 Stock In</b> (with an expiry date). Batches here are calculated automatically from your stock movements — they are a reference for expiry tracking, not a separate stock entry.</div>
+    <button class="btn bgh bbl" onclick="closeModal()">Close</button>`;
   document.getElementById('modal').classList.add('open');
-}
-async function saveNewBatch(sku){
-  const locId=document.getElementById('nb-loc').value;
-  const expiry=document.getElementById('nb-exp').value;
-  const batch=document.getElementById('nb-batch').value.trim();
-  const cases=parseInt(document.getElementById('nb-cases').value)||0;
-  const pcs=parseInt(document.getElementById('nb-pcs').value)||0;
-  if(!locId||!expiry){msg('nb-msg','⚠ Location & expiry date required',false);return;}
-  if(cases===0&&pcs===0){msg('nb-msg','⚠ Enter a quantity',false);return;}
-  await insertMov({id:uid(),date:TODAY,locId,sku,type:'IN',cases,pcs,batch,expiry,party:'',ref:'BATCH-ENTRY',notes:'Manual batch entry',createdBy:currentUser?.name||'',ts:Date.now()});
-  await logAction('BATCH_ADDED',sku+' — '+(cases*getPPC(sku)+pcs)+' pcs · exp '+expiry+' at '+locId);
-  msg('nb-msg','✅ Batch added!',true);
-  setTimeout(()=>openBatchModal(sku),700);
 }
 async function writeOffBatch(sku,locId,expiry,qty){
   if(!confirm('Write off '+qty+' pcs'+(expiry?' (exp '+fD(expiry)+')':'')+' at '+locId+'?\nRecords a negative stock adjustment.'))return;
@@ -1082,38 +1127,45 @@ function renderDashboard(){
 }
 
 // ── STOCK IN FORM ────────────────────────────────
+let inLines=[{cases:0,pcs:0,batch:'',expiry:''}];
+function snapIn(){const g=id=>document.getElementById(id)?.value;return{date:g('fi-date'),loc:g('fi-loc'),sku:g('fi-sku'),party:g('fi-party'),ref:g('fi-ref'),notes:g('fi-notes')};}
+function restIn(v){if(!v)return;const s=(id,val)=>{const el=document.getElementById(id);if(el&&val!=null&&val!=='')el.value=val;};s('fi-date',v.date);s('fi-loc',v.loc);s('fi-sku',v.sku);s('fi-party',v.party);s('fi-ref',v.ref);s('fi-notes',v.notes);if(v.sku)onSkuChange('fi');}
+function reIn(){const v=snapIn();renderIn();restIn(v);}
+function addInLine(){inLines.push({cases:0,pcs:0,batch:'',expiry:''});reIn();}
+function delInLine(i){inLines.splice(i,1);if(!inLines.length)inLines=[{cases:0,pcs:0,batch:'',expiry:''}];reIn();}
+function updInLine(i,field,val){inLines[i][field]=(field==='cases'||field==='pcs')?(parseInt(val)||0):val;}
 function renderIn(){
   const recent=movements.filter(m=>m.type==='IN').slice(-8).reverse();
+  const ppc=(()=>{const sku=document.getElementById('fi-sku')?.value;return sku?getPPC(sku):1;})();
   document.getElementById('content').innerHTML=`
   <div class="two-col">
-  ${canEdit()?`<div class="card"><div class="ch" style="background:#f0fdf4;border-bottom-color:#bbf7d0;color:#065f46">📥 Record Stock In</div><div class="cb">
+  ${canEdit()?`<div class="card"><div class="ch" style="background:#f0fdf4;border-bottom-color:#bbf7d0;color:#065f46">📥 Record Stock In <span style="font-size:10px;font-weight:600;color:#b45309">— add multiple expiry dates for the same product</span></div><div class="cb">
     <div class="frow f2">
       <div class="fg"><label>Date *</label><input type="date" id="fi-date" value="${TODAY}"/></div>
       <div class="fg"><label>Location *</label><select id="fi-loc"><option value="">Select...</option>${locs.map(l=>`<option value="${l.id}">${l.icon} ${esc(l.name)}</option>`).join('')}</select></div>
     </div>
-    <div class="fg"><label>Product / SKU *</label><select id="fi-sku" onchange="onSkuChange('fi')"><option value="">Select product...</option>${products.map(p=>`<option value="${p.sku}">${esc(p.sku)} — ${esc(p.name)}</option>`).join('')}</select></div>
+    <div class="fg"><label>Product / SKU *</label><select id="fi-sku" onchange="reIn()"><option value="">Select product...</option>${products.map(p=>`<option value="${p.sku}">${esc(p.sku)} — ${esc(p.name)}</option>`).join('')}</select></div>
     <div id="fi-info" style="display:none;background:var(--gl);border-radius:8px;padding:8px 12px;margin-bottom:10px;font-size:11px;color:var(--gd);font-weight:700"></div>
-    <div class="frow f2">
-      <div class="fg"><label>Cases *</label><input type="number" id="fi-cases" min="0" value="0" oninput="calcTP('fi')"/></div>
-      <div class="fg"><label>Pieces</label><input type="number" id="fi-pcs" min="0" value="0" oninput="calcTP('fi')"/></div>
-    </div>
     <div style="background:#fff7ed;border:1.5px solid #f59e0b;border-radius:10px;padding:12px 14px;margin-bottom:10px">
-      <div style="font-size:10px;font-weight:800;color:#92400e;letter-spacing:.5px;margin-bottom:8px">⚠️ BATCH & EXPIRY INFORMATION</div>
-      <div class="frow f2">
-        <div class="fg" style="margin-bottom:0"><label>Batch / Lot Number</label><input id="fi-batch" placeholder="e.g. B2025-01 / LOT-A"/></div>
-        <div class="fg" style="margin-bottom:0"><label style="color:#c2410c;font-weight:800">Expiry Date ★ Important</label>
-          <input type="date" id="fi-expiry" style="border-color:#f59e0b;background:#fffbeb" oninput="checkExpiry(this)"/>
-          <div class="fnote" id="fi-expiry-note" style="color:#92400e"></div>
-        </div>
-      </div>
+      <div style="font-size:10px;font-weight:800;color:#92400e;letter-spacing:.5px;margin-bottom:8px">📦 BATCHES & EXPIRY — each line is a separate batch with its own expiry date</div>
+      <div class="tw"><table style="width:100%;font-size:12px"><thead><tr style="background:#fffbeb"><th style="padding:5px;text-align:left;font-size:10px">Cases</th><th style="padding:5px;text-align:left;font-size:10px">Pieces</th><th style="padding:5px;text-align:left;font-size:10px">Batch No.</th><th style="padding:5px;text-align:left;font-size:10px;color:#c2410c">Expiry ★</th><th style="padding:5px;text-align:right;font-size:10px">Total</th><th></th></tr></thead><tbody>
+        ${inLines.map((ln,i)=>{const tot=ln.cases*ppc+ln.pcs;return`<tr>
+          <td style="padding:3px"><input type="number" min="0" value="${ln.cases}" oninput="updInLine(${i},'cases',this.value);document.getElementById('il-tot-${i}').textContent=((parseInt(this.value)||0)*${ppc}+${ln.pcs}).toLocaleString()" style="width:65px;padding:6px"/></td>
+          <td style="padding:3px"><input type="number" min="0" value="${ln.pcs}" oninput="updInLine(${i},'pcs',this.value);document.getElementById('il-tot-${i}').textContent=(${ln.cases}*${ppc}+(parseInt(this.value)||0)).toLocaleString()" style="width:65px;padding:6px"/></td>
+          <td style="padding:3px"><input value="${esc(ln.batch)}" oninput="updInLine(${i},'batch',this.value)" placeholder="LOT-A" style="width:90px;padding:6px"/></td>
+          <td style="padding:3px"><input type="date" value="${ln.expiry}" oninput="updInLine(${i},'expiry',this.value)" style="width:140px;padding:6px;border-color:#f59e0b;background:#fffbeb"/></td>
+          <td style="padding:3px;text-align:right;font-weight:700"><span id="il-tot-${i}">${tot.toLocaleString()}</span></td>
+          <td style="padding:3px">${inLines.length>1?`<button class="btn br bsm" onclick="delInLine(${i})" style="padding:2px 7px">×</button>`:''}</td>
+        </tr>`;}).join('')}
+      </tbody></table></div>
+      <button class="btn bgh bsm" onclick="addInLine()" style="margin-top:8px">+ Add another batch/expiry line</button>
     </div>
-    <div id="fi-tp" style="display:none;padding:8px 12px;background:#f8fafc;border-radius:8px;font-size:12px;font-weight:700;color:var(--dark);margin-bottom:10px"></div>
     <div class="frow f2">
       <div class="fg"><label>Supplier</label><input id="fi-party" placeholder="Supplier name"/></div>
       <div class="fg"><label>Reference / PO #</label><input id="fi-ref" placeholder="PO-2025-001"/></div>
     </div>
     <div class="fg"><label>Notes</label><input id="fi-notes" placeholder="Optional notes"/></div>
-    <button class="btn bg bbl" onclick="saveMov('IN')" style="margin-top:6px">📥 Save Stock In</button>
+    <button class="btn bg bbl" onclick="saveStockInMulti()" style="margin-top:6px">📥 Save Stock In</button>
     <div id="fi-msg" style="display:none;margin-top:8px;font-size:12px;font-weight:700;text-align:center"></div>
   </div></div>
 `:`<div class="al al-b" style="align-self:start">👁 View-only mode — you can browse records but cannot create entries.</div>`}
@@ -1128,6 +1180,25 @@ function renderIn(){
       </tr>`;}).join('')}
     </tbody></table></div>`:`<div class="cb" style="text-align:center;color:var(--muted);padding:30px">No entries yet</div>`}
   </div></div>`;
+  if(document.getElementById('fi-sku')){const v=document.getElementById('fi-sku').value;if(v)onSkuChange('fi');}
+}
+async function saveStockInMulti(){
+  const date=document.getElementById('fi-date').value;
+  const locId=document.getElementById('fi-loc').value;
+  const sku=document.getElementById('fi-sku').value;
+  const party=document.getElementById('fi-party').value.trim();
+  const ref=document.getElementById('fi-ref').value.trim();
+  const notes=document.getElementById('fi-notes').value.trim();
+  if(!date||!locId||!sku){msg('fi-msg','⚠ Fill Date, Location and Product',false);return;}
+  const valid=inLines.filter(ln=>(ln.cases||0)>0||(ln.pcs||0)>0);
+  if(!valid.length){msg('fi-msg','⚠ Enter at least one batch with a quantity',false);return;}
+  for(const ln of valid){
+    await insertMov({id:uid(),date,locId,sku,type:'IN',cases:ln.cases||0,pcs:ln.pcs||0,batch:ln.batch||'',expiry:ln.expiry||'',party,ref,notes,createdBy:currentUser?.name||'',ts:Date.now()});
+  }
+  await logAction('STOCK_IN',sku+' — '+valid.length+' batch line'+(valid.length>1?'s':'')+' at '+locId+' ('+valid.reduce((a,l)=>a+(l.cases*getPPC(sku)+l.pcs),0)+' pcs)');
+  msg('fi-msg','✅ Saved '+valid.length+' batch line'+(valid.length>1?'s':'')+'!',true);
+  inLines=[{cases:0,pcs:0,batch:'',expiry:''}];
+  setTimeout(()=>render(),800);
 }
 
 // ── STOCK OUT ────────────────────────────────────
@@ -1648,7 +1719,11 @@ function renderReport(locId){
     <div class="sc"><div class="sl">- Stock Out</div><div class="sv" style="color:#fca5a5">-${grandSO.toLocaleString()}</div><div class="ss">pieces</div></div>
     ${grandAdj!==0?`<div class="sc"><div class="sl">Adjustments</div><div class="sv" style="color:#ddd6fe">${grandAdj>=0?'+':''}${grandAdj.toLocaleString()}</div><div class="ss">pieces</div></div>`:''}
     <div class="sc" style="background:rgba(77,183,140,.1)"><div class="sl">Closing Stock</div><div class="sv" style="color:var(--g);font-size:18px">${grandCL.toLocaleString()}</div><div class="ss">AED ${grandVal.toLocaleString('en-AE',{maximumFractionDigits:0})}</div></div>
-  </div>`;
+  </div>
+  ${(()=>{
+    const dbl=products.filter(p=>{let ob=0,si=0;targetLocs.forEach(l=>{ob+=gOB(l.id,p.sku);si+=gIn(l.id,p.sku);});return ob>0&&si>0;});
+    return dbl.length?`<div class="al no-print" style="background:#fffbeb;border-color:#fcd34d;color:#92400e;margin-bottom:14px">⚠️ <b>Possible double-count warning:</b> ${dbl.length} product${dbl.length>1?'s have':' has'} both an <b>Opening Balance</b> and <b>Stock In</b> entries, which adds them together. If this stock was entered twice, set the Opening Balance to <b>0</b> for: <b>${dbl.map(p=>esc(p.sku)).join('، ')}</b>. Recommended: enter all stock via Stock In (with dates) and keep Opening Balance at 0.</div>`:'';
+  })()}`;
 
   if(!locId){
     // OVERALL: table per SKU with per-location breakdown + grand total
@@ -1664,12 +1739,13 @@ function renderReport(locId){
         let ob=0,si=0,ti=0,so=0,adj=0;
         locs.forEach(l=>{ob+=gOB(l.id,p.sku);si+=gIn(l.id,p.sku);ti+=gTfIn(l.id,p.sku);so+=gOut(l.id,p.sku);adj+=gAdj(l.id,p.sku);});
         const cl=ob+si+ti-so+adj;const val=Math.max(0,cl)*(p.cost||0);const ppc=p.ppc;
-        return`<tr>
+        const dblWarn=(ob>0&&si>0); // has BOTH opening balance AND stock in → possible double count
+        return`<tr${dblWarn?' style="background:#fffbeb"':''}>
           <td class="mono">${esc(p.sku)}</td>
-          <td style="font-weight:600">${esc(p.name)}</td>
+          <td style="font-weight:600">${esc(p.name)}${dblWarn?` <span title="This product has BOTH an Opening Balance and Stock In entries — it may be double-counted. Use one method only: set Opening Balance to 0 and keep Stock In (recommended)." style="cursor:help;color:#d97706;font-weight:800">⚠</span>`:''}</td>
           <td><span style="background:#f1f5f9;padding:2px 6px;border-radius:5px;font-size:10px;font-weight:700">${esc(p.cat)}</span></td>
           <td class="r">${ppc}</td>
-          <td class="r">${ob}</td>
+          <td class="r"${dblWarn?' style="color:#d97706;font-weight:800"':''}>${ob}</td>
           <td class="r" style="color:#1e40af;font-weight:700">${si>0?'+'+si:'—'}</td>
           <td class="r" style="color:var(--red);font-weight:700">${so>0?'-'+so:'—'}</td>
           <td class="r" style="color:#8b5cf6;font-weight:700">${adj!==0?(adj>0?'+':'')+adj:'—'}</td>
@@ -1962,7 +2038,7 @@ function save2(){
   localStorage.setItem('wms_invoices',JSON.stringify(invoices));
 }
 function load2(){
-  customers=JSON.parse(localStorage.getItem('wms_customers')||'[]');loadRet();loadDN();loadAppr();loadPay();loadPetty();loadSup();loadExp();loadAssets();loadSupPay();
+  customers=JSON.parse(localStorage.getItem('wms_customers')||'[]');loadRet();loadDN();loadAppr();loadPay();loadPetty();loadSup();loadExp();loadAssets();loadSupPay();loadRoleOverrides();
   invoices=JSON.parse(localStorage.getItem('wms_invoices')||'[]');
   auditLog=JSON.parse(localStorage.getItem('wms_audit')||'[]');
 }
@@ -3044,7 +3120,44 @@ function renderUsers(){
     <div class="cb" style="text-align:center;color:var(--muted);padding:20px">Loading users…</div>
   </div></div>
   <div class="al" style="margin-top:12px;background:#fffbeb;border-color:#fcd34d;color:#92400e;font-size:11px">⚠ For new users to log in immediately, disable <b>"Confirm email"</b> in Supabase → Authentication → Providers → Email. Password resets & user deletion from Auth are done in the Supabase dashboard.</div>
-  ${(()=>{const locked=(typeof listLockedAccounts==='function')?listLockedAccounts():[];return locked.length?`<div class="card" style="margin-top:14px"><div class="ch" style="background:#fef2f2;border-bottom-color:#fecaca;color:#991b1b">🔒 Locked Accounts (${locked.length})</div><div class="cb"><p style="font-size:12px;color:var(--muted);margin:0 0 10px">These accounts are locked after 3 failed login attempts. Unlock to allow login again.</p><div class="tw"><table><thead><tr><th>Account</th><th>Locked At</th><th></th></tr></thead><tbody>${locked.map(l=>`<tr><td style="font-weight:600">${esc(l.email)}</td><td style="font-size:11px;color:var(--muted)">${new Date(l.at).toLocaleString()}</td><td><button class="btn bg bsm" onclick="adminUnlockAccount('${esc(l.email)}')">🔓 Unlock</button></td></tr>`).join('')}</tbody></table></div></div></div>`:'';})()}
+  ${(()=>{
+    const rp=window._rpEdit||'inventory';
+    const cur=ROLES_get(rp);const curArr=Array.isArray(cur)?cur:[];
+    const isOverridden=!!roleOverrides[rp];
+    // group pages by section for a clean UI
+    const SECTIONS=[
+      ['Overview',[['dashboard','📊 Dashboard']]],
+      ['Stock Operations',[['in','📥 Stock In'],['out','📤 Stock Out'],['transfer','🔄 Transfer'],['adjust','⚖ Adjustment'],['log','📜 Movements Log']]],
+      ['Sales',[['invoices','🧾 Tax Invoices'],['customers','👥 Customers'],['sales','💰 Sales Report'],['returns','↩ Sales Returns'],['delivery','🚚 Delivery Notes'],['einvoice','📋 E-Invoicing']]],
+      ['Finance & Accounting',[['payments','💵 Payments'],['statement','📑 Customer Statements'],['cash','💰 Cash Management'],['suppliers','🌍 Suppliers / Import'],['expenses','💸 Expenses'],['assets','🏛 Fixed Assets'],['finstate','🏦 Financial Statements'],['accounting','🧮 Accounting & Tax'],['bookkeeping','📓 Bookkeeping']]],
+      ['Workflow & Reports',[['approvals','✅ Approvals'],['rep-all','📊 Stock Reports'],['outrep','📤 Stock Out Report'],['inrep','📥 Stock In Report'],['expiry','⏰ Expiry Report']]],
+      ['Master Data',[['products','🗂 Products'],['opening','🏁 Opening Balances'],['locations','📍 Locations'],['audit','🔒 Audit Log']]],
+    ];
+    return `<div class="card" style="margin-top:14px"><div class="ch" style="background:#eff6ff;border-bottom-color:#bfdbfe;color:#1e40af">🎛 Role Permissions — customise what each role can see</div><div class="cb">
+      <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:14px">
+        <label style="margin:0;font-weight:700;font-size:12px">Role:</label>
+        <select onchange="window._rpEdit=this.value;render()" style="width:auto;padding:8px 12px;font-weight:700">
+          ${EDITABLE_ROLES.map(r=>`<option value="${r}" ${rp===r?'selected':''}>${ROLE_LABELS[r]||r}</option>`).join('')}
+        </select>
+        ${isOverridden?`<span class="tag" style="background:#fef3c7;color:#92400e">✏ Customised</span><button class="btn bgh bsm" onclick="resetRole('${rp}')">↺ Reset to default</button>`:`<span class="tag" style="background:#f1f5f9;color:#64748b">Default</span>`}
+      </div>
+      <div class="al al-b" style="font-size:11px;margin-bottom:12px">ℹ️ Tick the pages <b>${ROLE_LABELS[rp]}</b> can access. Changes save to the server and apply to <b>all users</b> with this role on all devices. (Admin always has full access and can't be limited.)</div>
+      <div id="rp-boxes">
+      ${SECTIONS.map(([sec,pages])=>`<div style="margin-bottom:12px">
+        <div style="font-size:10px;font-weight:800;color:#64748b;text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px;border-bottom:1px solid var(--border);padding-bottom:3px">${sec}</div>
+        <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(190px,1fr));gap:6px">
+          ${pages.map(([pg,lbl])=>`<label style="display:flex;align-items:center;gap:7px;font-size:12px;font-weight:600;cursor:pointer;background:#f8fafc;border:1px solid var(--border);border-radius:7px;padding:7px 10px;margin:0">
+            <input type="checkbox" class="rp-cb" value="${pg}" ${curArr.includes(pg)?'checked':''} style="width:16px;height:16px;flex-shrink:0"/>${lbl}</label>`).join('')}
+        </div></div>`).join('')}
+      </div>
+      <button class="btn bg bbl" style="margin-top:6px" onclick="saveRoleEdit('${rp}')">💾 Save ${ROLE_LABELS[rp]} Permissions</button>
+      <div id="rp-msg" style="display:none;margin-top:8px;font-size:12px;font-weight:700;text-align:center"></div>
+    </div></div>`;
+  })()}
+  ${(()=>{const locked=(typeof listLockedAccounts==='function')?listLockedAccounts():[];return `<div class="card" style="margin-top:14px"><div class="ch" style="background:${locked.length?'#fef2f2':'#f0fdf4'};border-bottom-color:${locked.length?'#fecaca':'#bbf7d0'};color:${locked.length?'#991b1b':'#065f46'}">🔒 Account Security — Locked Accounts (${locked.length})</div><div class="cb">
+    <p style="font-size:12px;color:var(--muted);margin:0 0 10px">Accounts lock automatically after <b>3 failed login attempts</b>. Locked users see a message asking them to contact an administrator. ${locked.length?'Unlock below to allow login again:':'<b style="color:#065f46">No accounts are currently locked. ✓</b>'}</p>
+    ${locked.length?`<div class="tw"><table><thead><tr><th>Account</th><th>Locked At</th><th></th></tr></thead><tbody>${locked.map(l=>`<tr><td style="font-weight:600">${esc(l.email)}</td><td style="font-size:11px;color:var(--muted)">${new Date(l.at).toLocaleString()}</td><td><button class="btn bg bsm" onclick="adminUnlockAccount('${esc(l.email)}')">🔓 Unlock</button></td></tr>`).join('')}</tbody></table></div>`:''}
+  </div></div>`;})()}
   <div class="card" style="margin-top:14px"><div class="ch" style="background:#eff6ff;border-bottom-color:#bfdbfe;color:#1e40af">💾 Backup & Restore</div><div class="cb">
     <p style="font-size:12px;color:var(--muted);margin:0 0 12px">Download a complete snapshot of all system data (products, stock movements, customers, invoices, returns, delivery notes, audit log) as a single JSON file. Keep regular backups in a safe place. Restore replaces all current data with a backup file.</p>
     <div style="display:flex;gap:10px;flex-wrap:wrap">
@@ -3099,8 +3212,9 @@ function openUserModal(id){
     </div>
     ${u?'':'<div class="fg"><label>Password * (min 6 chars)</label><input id="u-pass" type="text" placeholder="Temporary password"/></div>'}
     <div class="fg"><label>Role *</label><select id="u-role" onchange="document.getElementById('u-custom').style.display=this.value==='custom'?'block':'none'">
-      <option value="inventory" ${normRole(u?.role)==='inventory'?'selected':''}>📦 Inventory — full warehouse control</option>
-      <option value="sales" ${normRole(u?.role)==='sales'?'selected':''}>🧾 Sales — invoices/customers/sales + inventory view</option>
+      <option value="inventory" ${normRole(u?.role)==='inventory'?'selected':''}>📦 Inventory — warehouse: stock in/out, products, suppliers</option>
+      <option value="sales" ${normRole(u?.role)==='sales'?'selected':''}>🧾 Sales — invoices, customers, payments, returns</option>
+      <option value="accountant" ${normRole(u?.role)==='accountant'?'selected':''}>🧮 Accountant — cash, VAT, expenses, assets, bookkeeping</option>
       <option value="management" ${normRole(u?.role)==='management'?'selected':''}>🛡️ Management — sees everything + approves/rejects invoices</option>
       <option value="viewer" ${normRole(u?.role)==='viewer'?'selected':''}>👁 Viewer — read-only, sees everything, no approvals</option>
       <option value="admin" ${normRole(u?.role)==='admin'?'selected':''}>👑 Admin — everything incl. users & audit</option>
@@ -3204,7 +3318,7 @@ function renderReturns(){
       <div class="frow f3" style="margin-bottom:12px">
         <div class="fg"><label>GRV No.</label><input id="grv-no" value="${editingGrvId?(returns.find(x=>x.id===editingGrvId)?.grvNo||nextGrvNo()):nextGrvNo()}" readonly style="background:#f1f5f9;font-weight:700"/></div>
         <div class="fg"><label>Date *</label><input type="date" id="grv-date" value="${TODAY}"/></div>
-        <div class="fg"><label>↩ Return to Location (stock back in)</label><select id="grv-loc"><option value="">— No stock return —</option>${locs.map(l=>`<option value="${l.id}">${l.icon} ${esc(l.name)}</option>`).join('')}</select></div>
+        <div class="fg" style="display:none"><input type="hidden" id="grv-loc" value=""/></div>
       </div>
       <div class="frow f2" style="margin-bottom:12px">
         <div class="fg"><label>🔎 Original Invoice <span style="color:var(--g);text-transform:none">(search # or customer — pulls items)</span></label>
@@ -5508,7 +5622,7 @@ document.addEventListener('DOMContentLoaded',()=>{injectLogos();startClock();sta
         if(savedUser&&savedUser.email!=='offline'){
           currentUser=savedUser;
           updateUserUI();
-          await loadFromDB();await loadSalesFromDB();await loadReturnsFromDB();await loadDNFromDB();await loadApprovalsFromDB();await loadPaymentsFromDB();await loadPettyFromDB();await loadSupFromDB();await loadSupPayFromDB();await loadExpFromDB();await loadAssetsFromDB();subscribeRealtime();go('dashboard');
+          await loadFromDB();await loadSalesFromDB();await loadReturnsFromDB();await loadDNFromDB();await loadApprovalsFromDB();await loadPaymentsFromDB();await loadPettyFromDB();await loadSupFromDB();await loadSupPayFromDB();await loadExpFromDB();await loadAssetsFromDB();await loadRoleOverridesFromDB();subscribeRealtime();go('dashboard');
           return;
         }
       }
