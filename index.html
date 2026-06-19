@@ -273,8 +273,10 @@ input:focus,select:focus,textarea:focus{border-color:var(--g);background:var(--w
     <div class="ni" id="nav-cash" onclick="go('cash')"><span class="ic">💰</span>Cash Management</div>
     <div class="ni" id="nav-suppliers" onclick="go('suppliers')"><span class="ic">🌍</span>Suppliers / Import</div>
     <div class="ni" id="nav-expenses" onclick="go('expenses')"><span class="ic">💸</span>Expenses</div>
+    <div class="ni" id="nav-assets" onclick="go('assets')"><span class="ic">🏛</span>Fixed Assets</div>
     <div class="ni" id="nav-finstate" onclick="go('finstate')"><span class="ic">🏦</span>Financial Statements</div>
     <div class="ni" id="nav-accounting" onclick="go('accounting')"><span class="ic">🧮</span>Accounting &amp; Tax</div>
+    <div class="ni" id="nav-bookkeeping" onclick="go('bookkeeping')"><span class="ic">📓</span>Bookkeeping</div>
     <div class="ns">Workflow</div>
     <div class="ni" id="nav-approvals" onclick="go('approvals')"><span class="ic">✅</span>Approvals <span class="nb" id="appr-nb" style="display:none">0</span></div>
     <div class="ns">Reports</div>
@@ -455,8 +457,8 @@ const ROLES={
   admin:'all',
   inventory:['dashboard','in','out','transfer','adjust','log','rep-all','outrep','inrep','expiry','products','opening','locations','suppliers'],
   sales:['dashboard','out','rep-all','outrep','invoices','customers','sales','returns','delivery','payments','statement','cash','expenses','approvals','einvoice'],
-  viewer:['dashboard','in','out','transfer','adjust','log','rep-all','outrep','inrep','expiry','products','opening','locations','invoices','customers','sales','returns','delivery','payments','statement','cash','suppliers','expenses','accounting','finstate','approvals','einvoice','audit'],
-  management:['dashboard','in','out','transfer','adjust','log','rep-all','outrep','inrep','expiry','products','opening','locations','invoices','customers','sales','returns','delivery','payments','statement','cash','suppliers','expenses','accounting','finstate','approvals','einvoice','audit'],
+  viewer:['dashboard','in','out','transfer','adjust','log','rep-all','outrep','inrep','expiry','products','opening','locations','invoices','customers','sales','returns','delivery','payments','statement','cash','suppliers','expenses','assets','accounting','bookkeeping','finstate','approvals','einvoice','audit'],
+  management:['dashboard','in','out','transfer','adjust','log','rep-all','outrep','inrep','expiry','products','opening','locations','invoices','customers','sales','returns','delivery','payments','statement','cash','suppliers','expenses','assets','accounting','bookkeeping','finstate','approvals','einvoice','audit'],
 };
 const ROLE_LABELS={admin:'👑 Admin',management:'🛡️ Management',inventory:'📦 Inventory',sales:'🧾 Sales',viewer:'👁 Viewer (Read-only)',custom:'⚙ Custom'};
 function normRole(r){return r==='limited'?'sales':(r||'sales');}
@@ -492,11 +494,19 @@ async function doLogin(){
   }
   if(email&&!email.includes('@'))email+='@omniaft.com';
   if(!email||!pass){err.style.display='block';err.textContent='Enter email and password';return;}
+  // ── ACCOUNT LOCKOUT CHECK (3 failed attempts) ──
+  if(isAccountLocked(email)){
+    err.style.display='block';
+    err.style.background='#fef2f2';err.style.color='#991b1b';
+    err.innerHTML='🔒 <b>Account locked</b> after 3 failed attempts. Please contact your administrator to unlock it.';
+    return;
+  }
   err.style.display='none';
   initSB();
   try{
     const{data,error}=await SB.auth.signInWithPassword({email,password:pass});
     if(error)throw error;
+    clearLoginAttempts(email); // success → reset counter
     const{data:profile}=await SB.from('user_profiles').select('*').eq('id',data.user.id).single();
     currentUser={email:data.user.email,name:profile?.name||email.split('@')[0],role:normRole(profile?.role),perms:profile?.perms||null};
     localStorage.setItem('wms_user',JSON.stringify(currentUser));
@@ -504,20 +514,47 @@ async function doLogin(){
     logAction('LOGIN',email);
     try{updateUserUI();}catch(e){console.error('updateUserUI:',e);}
     resetIdleTimer();
-    try{await loadFromDB();await loadSalesFromDB();await loadReturnsFromDB();await loadDNFromDB();await loadApprovalsFromDB();await loadPaymentsFromDB();await loadPettyFromDB();await loadSupFromDB();await loadSupPayFromDB();await loadExpFromDB();}catch(e){console.error('loadFromDB:',e);load();load2();}
+    try{await loadFromDB();await loadSalesFromDB();await loadReturnsFromDB();await loadDNFromDB();await loadApprovalsFromDB();await loadPaymentsFromDB();await loadPettyFromDB();await loadSupFromDB();await loadSupPayFromDB();await loadExpFromDB();await loadAssetsFromDB();}catch(e){console.error('loadFromDB:',e);load();load2();}
     try{subscribeRealtime();}catch(e){console.error('realtime:',e);}
     try{setTimeout(checkBackupReminder,1500);}catch(e){}
     try{go('dashboard');}catch(e){console.error('go:',e);document.getElementById('content').innerHTML='<div style="padding:40px;text-align:center;color:red">Error: '+e.message+'</div>';}
   }catch(e){
     err.style.display='block';
-    if(e.message?.includes('Invalid login'))
-      err.textContent='❌ Wrong email or password';
+    if(e.message?.includes('Invalid login')){
+      const left=recordFailedAttempt(email);
+      if(left<=0){
+        lockAccount(email);
+        err.style.background='#fef2f2';err.style.color='#991b1b';
+        err.innerHTML='🔒 <b>Account locked.</b> Too many failed attempts. Contact your administrator to unlock.';
+        try{logAction('ACCOUNT_LOCKED',email+' — 3 failed login attempts');}catch(x){}
+      }else{
+        err.textContent='❌ Wrong email or password. '+left+' attempt'+(left>1?'s':'')+' left before lockout.';
+      }
+    }
     else if(e.message?.includes('user_profiles'))
       err.textContent='❌ Login OK but user profile not found. Ask admin to run auth_setup.sql';
     else
       err.textContent='❌ '+e.message;
   }
 }
+// ── Account lockout helpers (interface-level deterrent) ──
+function loginAttemptsKey(email){return 'wms_attempts_'+email.toLowerCase();}
+function lockedKey(email){return 'wms_locked_'+email.toLowerCase();}
+function recordFailedAttempt(email){
+  const k=loginAttemptsKey(email);
+  const n=(+localStorage.getItem(k)||0)+1;
+  localStorage.setItem(k,n);
+  return Math.max(0,3-n); // attempts left
+}
+function clearLoginAttempts(email){localStorage.removeItem(loginAttemptsKey(email));localStorage.removeItem(lockedKey(email));}
+function lockAccount(email){localStorage.setItem(lockedKey(email),JSON.stringify({at:Date.now(),email:email.toLowerCase()}));}
+function isAccountLocked(email){return !!localStorage.getItem(lockedKey(email));}
+function listLockedAccounts(){
+  const out=[];
+  for(let i=0;i<localStorage.length;i++){const key=localStorage.key(i);if(key&&key.startsWith('wms_locked_')){try{const v=JSON.parse(localStorage.getItem(key));out.push({email:v.email,at:v.at});}catch(e){}}}
+  return out;
+}
+function adminUnlockAccount(email){clearLoginAttempts(email);logAction('ACCOUNT_UNLOCKED',email);render();}
 function skipLogin(){
   currentUser={email:'offline',name:'Offline User',role:'admin'};
   useLocal=true;
@@ -699,11 +736,15 @@ const prodMap=()=>Object.fromEntries(products.map(p=>[p.sku,p]));
 // ── STOCK CALCULATIONS ───────────────────────────
 function getPPC(sku){return products.find(p=>p.sku===sku)?.ppc||1;}
 function getOB(locId,sku){const r=openingBal.find(o=>o.locId===locId&&o.sku===sku);return r?(r.cases*getPPC(sku)+(+r.pcs||0)):0;}
+// If a product/location has any IN or TF-in movement (i.e. real batches were added),
+// the Opening Balance is IGNORED to avoid double counting. Batches replace the OB.
+function hasBatchMovements(locId,sku){return movements.some(m=>m.sku===sku&&((m.type==='IN'&&m.locId===locId)||(m.type==='TF'&&m.toLoc===locId)));}
+function effectiveOB(locId,sku){return hasBatchMovements(locId,sku)?0:getOB(locId,sku);}
 function getIn(locId,sku){return movements.filter(m=>m.sku===sku&&m.type==='IN'&&m.locId===locId).reduce((a,m)=>a+(m.cases*getPPC(sku))+(+m.pcs||0),0);}
 function getOut(locId,sku){return movements.filter(m=>m.sku===sku&&m.locId===locId&&(m.type==='OUT'||(m.type==='TF'&&m.fromLoc===locId))).reduce((a,m)=>a+(m.cases*getPPC(sku))+(+m.pcs||0),0);}
 function getTfIn(locId,sku){return movements.filter(m=>m.sku===sku&&m.type==='TF'&&m.toLoc===locId).reduce((a,m)=>a+(m.cases*getPPC(sku))+(+m.pcs||0),0);}
 function getAdj(locId,sku){return movements.filter(m=>m.sku===sku&&m.type==='ADJ'&&m.locId===locId).reduce((a,m)=>a+(m.adjQty||0),0);}
-function getClose(locId,sku){return getOB(locId,sku)+getIn(locId,sku)+getTfIn(locId,sku)-getOut(locId,sku)+getAdj(locId,sku);}
+function getClose(locId,sku){return effectiveOB(locId,sku)+getIn(locId,sku)+getTfIn(locId,sku)-getOut(locId,sku)+getAdj(locId,sku);}
 function cpStr(pcs,ppc){const c=Math.floor(Math.abs(pcs)/ppc),p=Math.abs(pcs)%ppc;return(pcs<0?'-':'')+c+'cs '+p+'pcs';}
 function cpStrFmt(pcs,ppc){const c=Math.floor(pcs/ppc),p=pcs%ppc;return`<span style="font-weight:700">${c}</span><small style="color:var(--muted)"> cs</small> <span style="font-weight:700">${p}</span><small style="color:var(--muted)"> pcs</small>`;}
 
@@ -723,7 +764,7 @@ function getBatchStock(locId,sku){
     if(left>0){add('',0);buckets['__none__'].qty-=left;}
   };
   const p=prodMap()[sku];
-  const ob=getOB(locId,sku);
+  const ob=effectiveOB(locId,sku);
   if(ob>0)add(p?.expiry||'',ob);
   const movs=movements.filter(m=>m.sku===sku).slice().sort((a,b)=>(a.ts||0)-(b.ts||0)||(a.date<b.date?-1:a.date>b.date?1:0));
   for(const m of movs){
@@ -853,8 +894,10 @@ const pageInfo={
   cash:['Cash Management','Collected cash, petty cash & cash flow'],
   suppliers:['Suppliers / Import','Manage import suppliers & purchase orders (EUR/AED)'],
   expenses:['Expenses','Business expenses by category with recoverable VAT'],
+  assets:['Fixed Assets','Company assets & depreciation (straight-line)'],
   finstate:['Financial Statements','Balance sheet, income statement & cash flow'],
   accounting:['Accounting & Tax','VAT return, payables, P&L & corporate tax'],
+  bookkeeping:['Bookkeeping','Unified journal of all financial transactions'],
   approvals:['Approvals','Invoice edit/cancel approval requests'],
   audit:['Audit Log','Immutable activity trail'],
   users:['User Management','Add users & control permissions'],
@@ -914,7 +957,7 @@ function render(){
   try{
     renderLocNav();
     if(typeof updateApprBadge==='function')updateApprBadge();
-    const map={dashboard:renderDashboard,in:renderIn,out:renderOut,transfer:renderTransfer,adjust:renderAdjust,log:renderLog,expiry:renderExpiry,products:renderProducts,opening:renderOpening,locations:renderLocations,invoices:renderInvoices,customers:renderCustomers,sales:renderSales,returns:renderReturns,delivery:renderDelivery,payments:renderPayments,statement:renderStatement,cash:renderCash,suppliers:renderSuppliers,expenses:renderExpenses,accounting:renderAccounting,finstate:renderFinStatements,einvoice:renderEInvoiceQueue,approvals:renderApprovals,audit:renderAudit,users:renderUsers,outrep:renderOutReport,inrep:renderInReport};
+    const map={dashboard:renderDashboard,in:renderIn,out:renderOut,transfer:renderTransfer,adjust:renderAdjust,log:renderLog,expiry:renderExpiry,products:renderProducts,opening:renderOpening,locations:renderLocations,invoices:renderInvoices,customers:renderCustomers,sales:renderSales,returns:renderReturns,delivery:renderDelivery,payments:renderPayments,statement:renderStatement,cash:renderCash,suppliers:renderSuppliers,expenses:renderExpenses,assets:renderAssets,accounting:renderAccounting,bookkeeping:renderBookkeeping,finstate:renderFinStatements,einvoice:renderEInvoiceQueue,approvals:renderApprovals,audit:renderAudit,users:renderUsers,outrep:renderOutReport,inrep:renderInReport};
     if(curPage.startsWith('rep-'))renderReport(curPage==='rep-all'?null:curPage.replace('rep-',''));
     else(map[curPage]||renderDashboard)();
     updateExpBadge();
@@ -1808,7 +1851,7 @@ function openProdModal(id){
 function renderOpening(){
   document.getElementById('content').innerHTML=`
   <div class="al al-b no-print">ℹ️ Set the opening (initial) stock balance for each product per location before recording movements.</div>
-  <div class="al no-print" style="background:#fffbeb;border-color:#fcd34d;color:#92400e;margin-bottom:12px">⚠️ <b>Important — avoid double counting:</b> Opening Balance has <b>no expiry date</b>. If you want to track stock <b>with expiry dates</b>, leave Opening Balance at <b>0</b> and add the stock through <b>Batches</b> (Products → 📅) or <b>Stock In</b> instead. Using both for the same product counts the stock twice.</div>
+  <div class="al al-b no-print" style="margin-bottom:12px">ℹ️ Set the opening (initial) stock here so it shows in reports. When you later add <b>Batches with expiry dates</b> for a product (Products → 📅) or record <b>Stock In</b>, the system automatically uses those batches and ignores this opening balance — so stock is never double-counted.</div>
   ${locs.map(loc=>`
   <div class="card" style="margin-bottom:12px">
     <div class="ch">${loc.icon} ${esc(loc.name)}</div>
@@ -1919,7 +1962,7 @@ function save2(){
   localStorage.setItem('wms_invoices',JSON.stringify(invoices));
 }
 function load2(){
-  customers=JSON.parse(localStorage.getItem('wms_customers')||'[]');loadRet();loadDN();loadAppr();loadPay();loadPetty();loadSup();loadExp();loadSupPay();
+  customers=JSON.parse(localStorage.getItem('wms_customers')||'[]');loadRet();loadDN();loadAppr();loadPay();loadPetty();loadSup();loadExp();loadAssets();loadSupPay();
   invoices=JSON.parse(localStorage.getItem('wms_invoices')||'[]');
   auditLog=JSON.parse(localStorage.getItem('wms_audit')||'[]');
 }
@@ -2088,7 +2131,7 @@ async function cancelInvoice(id){
     usedAppr=findApproval('cancel',id);
     if(!usedAppr){requestApproval('cancel',inv);return;}
   }
-  if(!confirm('Cancel invoice '+inv.invNo+'?\nStock deducted by this invoice will be returned. This cannot be undone.'))return;
+  if(!confirm('Cancel invoice '+inv.invNo+'?\nThis cannot be undone.'))return;
   if(usedAppr)await consumeApproval(usedAppr);
   await removeInvStockMovs(inv.invNo);
   inv.cancelled=true;
@@ -2133,9 +2176,7 @@ function renderInvoices(){
       </div>
       <div id="inv-branch-row" style="display:none;margin-bottom:12px"><div class="fg"><label>🏬 Branch</label><select id="inv-branch"></select></div></div>
       <div class="frow f3" style="margin-bottom:12px">
-        <div class="fg"><label>📍 Deduct Stock From (optional)</label><select id="inv-loc"><option value="">— No stock deduction —</option>${locs.map(l=>`<option value="${l.id}">${l.icon} ${esc(l.name)}</option>`).join('')}</select>
-          <div class="fnote">If selected, sold + FOC qty deduct FEFO from this location</div>
-        </div>
+        <input type="hidden" id="inv-loc" value=""/>
         <div class="fg"><label>💳 Payment Status *</label><select id="inv-pay">
           <option value="unpaid">🔴 Unpaid — لم يتم الدفع</option>
           <option value="paid">🟢 Paid — تم الدفع</option>
@@ -2314,18 +2355,9 @@ async function saveInvoice(){
     invoices.push(inv);
     await dbInsertInvoice(inv);
   }
-  // Optional stock deduction
-  if(locId){
-    for(const l of valid){
-      const p=products.find(x=>x.sku===l.sku);const ppc=p?.ppc||1;
-      const totalQty=l.qty+(+l.foc||0);
-      const _totPcs=(l.unit==='pc'?totalQty:totalQty*ppc);
-      await fefoSplit(locId,l.sku,_totPcs,async(take,b)=>{
-        await insertMov({id:uid(),date,locId,sku:l.sku,type:'OUT',cases:Math.floor(take/ppc),pcs:take%ppc,batch:b.batch||'',expiry:b.expiry||'',party:custName,ref:inv.invNo,driver:'',notes:'Auto from invoice '+inv.invNo+(l.foc?' (incl '+l.foc+' FOC)':''),createdBy:currentUser?.name||'',ts:Date.now()});
-      });
-    }
-  }
-  await logAction(_editing?'INVOICE_UPDATED':'INVOICE_CREATED','Invoice '+inv.invNo+' for '+custName+' — '+fmtAED(inv.total)+(locId?' (stock deducted from '+locId+')':''));
+  // NOTE: Invoices no longer deduct stock. Stock is controlled ONLY via Stock In/Out
+  // by the inventory manager. Invoices/Returns/Delivery Notes are records only.
+  await logAction(_editing?'INVOICE_UPDATED':'INVOICE_CREATED','Invoice '+inv.invNo+' for '+custName+' — '+fmtAED(inv.total));
   save2();
   msg('inv-msg',(_editing?'✅ Invoice '+inv.invNo+' updated!':'✅ Invoice '+inv.invNo+' saved!'),true);
   editingInvId=null;
@@ -2985,7 +3017,7 @@ function exportInRepCSV(){
 
 // ══ USERS MANAGEMENT (admin only) ══
 let usersList=[];
-const ALL_PAGES=[['dashboard','📊 Dashboard'],['in','📥 Stock In'],['out','📤 Stock Out'],['transfer','🔄 Transfer'],['adjust','⚖ Adjustment'],['log','📜 Movements Log'],['rep-all','📈 Stock Reports'],['outrep','📤 Stock Out Report'],['inrep','📥 Stock In Report'],['expiry','⏰ Expiry Report'],['products','📦 Products'],['opening','🔢 Opening Balances'],['locations','📍 Locations'],['invoices','🧾 Tax Invoices'],['customers','👥 Customers'],['sales','💰 Sales Report'],['returns','↩ Sales Returns'],['delivery','🚚 Delivery Notes'],['payments','💵 Payments'],['statement','📑 Customer Statements'],['cash','💰 Cash Management'],['suppliers','🌍 Suppliers / Import'],['expenses','💸 Expenses'],['accounting','🧮 Accounting & Tax'],['finstate','🏦 Financial Statements'],['einvoice','📋 E-Invoicing']];
+const ALL_PAGES=[['dashboard','📊 Dashboard'],['in','📥 Stock In'],['out','📤 Stock Out'],['transfer','🔄 Transfer'],['adjust','⚖ Adjustment'],['log','📜 Movements Log'],['rep-all','📈 Stock Reports'],['outrep','📤 Stock Out Report'],['inrep','📥 Stock In Report'],['expiry','⏰ Expiry Report'],['products','📦 Products'],['opening','🔢 Opening Balances'],['locations','📍 Locations'],['invoices','🧾 Tax Invoices'],['customers','👥 Customers'],['sales','💰 Sales Report'],['returns','↩ Sales Returns'],['delivery','🚚 Delivery Notes'],['payments','💵 Payments'],['statement','📑 Customer Statements'],['cash','💰 Cash Management'],['suppliers','🌍 Suppliers / Import'],['expenses','💸 Expenses'],['assets','🏛 Fixed Assets'],['accounting','🧮 Accounting & Tax'],['bookkeeping','📓 Bookkeeping'],['finstate','🏦 Financial Statements'],['einvoice','📋 E-Invoicing']];
 async function refreshUsers(){
   if(SB&&!useLocal){
     try{
@@ -3012,6 +3044,7 @@ function renderUsers(){
     <div class="cb" style="text-align:center;color:var(--muted);padding:20px">Loading users…</div>
   </div></div>
   <div class="al" style="margin-top:12px;background:#fffbeb;border-color:#fcd34d;color:#92400e;font-size:11px">⚠ For new users to log in immediately, disable <b>"Confirm email"</b> in Supabase → Authentication → Providers → Email. Password resets & user deletion from Auth are done in the Supabase dashboard.</div>
+  ${(()=>{const locked=(typeof listLockedAccounts==='function')?listLockedAccounts():[];return locked.length?`<div class="card" style="margin-top:14px"><div class="ch" style="background:#fef2f2;border-bottom-color:#fecaca;color:#991b1b">🔒 Locked Accounts (${locked.length})</div><div class="cb"><p style="font-size:12px;color:var(--muted);margin:0 0 10px">These accounts are locked after 3 failed login attempts. Unlock to allow login again.</p><div class="tw"><table><thead><tr><th>Account</th><th>Locked At</th><th></th></tr></thead><tbody>${locked.map(l=>`<tr><td style="font-weight:600">${esc(l.email)}</td><td style="font-size:11px;color:var(--muted)">${new Date(l.at).toLocaleString()}</td><td><button class="btn bg bsm" onclick="adminUnlockAccount('${esc(l.email)}')">🔓 Unlock</button></td></tr>`).join('')}</tbody></table></div></div></div>`:'';})()}
   <div class="card" style="margin-top:14px"><div class="ch" style="background:#eff6ff;border-bottom-color:#bfdbfe;color:#1e40af">💾 Backup & Restore</div><div class="cb">
     <p style="font-size:12px;color:var(--muted);margin:0 0 12px">Download a complete snapshot of all system data (products, stock movements, customers, invoices, returns, delivery notes, audit log) as a single JSON file. Keep regular backups in a safe place. Restore replaces all current data with a backup file.</p>
     <div style="display:flex;gap:10px;flex-wrap:wrap">
@@ -3275,12 +3308,8 @@ async function saveReturn(){
     const idx=returns.findIndex(x=>x.id===r.id);returns[idx]=r;
     await dbUpdateReturn(r);
   }else{returns.push(r);await dbInsertReturn(r);}
-  // stock back IN (FEFO can't apply to returns — add as IN)
-  if(locId){
-    for(const l of valid){const ppc=getPPC(l.sku);const cs=l.unit==='pc'?0:l.qty;const pc=l.unit==='pc'?l.qty:0;
-      await insertMov({id:uid(),date,locId,sku:l.sku,type:'IN',cases:cs,pcs:pc,batch:'',expiry:'',party:custName,ref:r.grvNo,notes:'Sales return '+r.grvNo,createdBy:currentUser?.name||'',ts:Date.now()});}
-  }
-  await logAction(_edit?'RETURN_UPDATED':'RETURN_CREATED','GRV '+r.grvNo+' for '+custName+' — '+fmtAED(r.total)+(locId?' (stock returned to '+locId+')':''));
+  // NOTE: Returns no longer add stock back automatically. Stock controlled only via Stock In/Out.
+  await logAction(_edit?'RETURN_UPDATED':'RETURN_CREATED','GRV '+r.grvNo+' for '+custName+' — '+fmtAED(r.total));
   saveRet();
   msg('grv-msg',(_edit?'✅ GRV '+r.grvNo+' updated!':'✅ GRV '+r.grvNo+' saved!'),true);
   editingGrvId=null;grvLines=[{sku:'',unit:'case',qty:1,price:0,disc:0}];grvSrcInv=null;
@@ -3367,7 +3396,7 @@ function renderDelivery(){
       <div class="frow f3" style="margin-bottom:12px">
         <div class="fg"><label>DN No.</label><input id="dn-no" value="${editingDnId?(deliveries.find(x=>x.id===editingDnId)?.dnNo||nextDnNo()):nextDnNo()}" readonly style="background:#f1f5f9;font-weight:700"/></div>
         <div class="fg"><label>Date *</label><input type="date" id="dn-date" value="${TODAY}"/></div>
-        <div class="fg"><label>📍 Deduct Stock From (optional)</label><select id="dn-loc"><option value="">— No stock deduction —</option>${locs.map(l=>`<option value="${l.id}">${l.icon} ${esc(l.name)}</option>`).join('')}</select></div>
+        <div class="fg" style="display:none"><input type="hidden" id="dn-loc" value=""/></div>
       </div>
       <div class="frow f3" style="margin-bottom:12px">
         <div class="fg"><label>👤 Customer Name *</label><input id="dn-cust" list="dn-cust-list" placeholder="Search customer" oninput="onDnCustPick(this.value)" autocomplete="off"/>
@@ -3433,9 +3462,9 @@ async function saveDelivery(){
     lpo:document.getElementById('dn-lpo').value.trim(),narration:document.getElementById('dn-narration').value.trim(),locId,
     items:valid.map(l=>({sku:l.sku,name:prodMap()[l.sku]?.name||l.sku,unit:l.unit||'case',qty:l.qty,totalPcs:(l.unit==='pc'?l.qty:l.qty*getPPC(l.sku))})),
     createdBy:currentUser?.name||'',ts:_edit?_edit.ts:Date.now()};
-  if(_edit){await removeDnStockMovs(d.dnNo);const idx=deliveries.findIndex(x=>x.id===d.id);deliveries[idx]=d;await dbUpdateDN(d);}else{deliveries.push(d);await dbInsertDN(d);}
-  if(locId){for(const l of valid){const ppc=getPPC(l.sku);const totalPcs=l.unit==='pc'?l.qty:l.qty*ppc;await fefoSplit(locId,l.sku,totalPcs,async(take,b)=>{await insertMov({id:uid(),date,locId,sku:l.sku,type:'OUT',cases:Math.floor(take/ppc),pcs:take%ppc,batch:b.batch||'',expiry:b.expiry||'',party:custName,ref:d.dnNo,driver:d.employee,notes:'Delivery note '+d.dnNo,createdBy:currentUser?.name||'',ts:Date.now()});});}}
-  await logAction(_edit?'DELIVERY_UPDATED':'DELIVERY_CREATED','DN '+d.dnNo+' for '+custName+(locId?' (stock deducted from '+locId+')':''));
+  if(_edit){const idx=deliveries.findIndex(x=>x.id===d.id);deliveries[idx]=d;await dbUpdateDN(d);}else{deliveries.push(d);await dbInsertDN(d);}
+  // NOTE: Delivery Notes no longer deduct stock. Stock controlled only via Stock In/Out.
+  await logAction(_edit?'DELIVERY_UPDATED':'DELIVERY_CREATED','DN '+d.dnNo+' for '+custName);
   saveDN();msg('dn-msg',(_edit?'✅ DN '+d.dnNo+' updated!':'✅ DN '+d.dnNo+' saved!'),true);
   editingDnId=null;dnLines=[{sku:'',unit:'case',qty:1}];
   setTimeout(()=>{render();printDelivery(d.id);},900);
@@ -4994,7 +5023,8 @@ function renderFinStatements(){
   const pettyOnHand=(typeof pettyCash!=='undefined'?pettyCash:[]).reduce((a,e)=>a+(e.type==='in'?e.amount:-e.amount),0);
   // Liabilities
   const payables=(typeof suppliers!=='undefined'?suppliers:[]).reduce((a,s)=>{const b=supplierBalance(s.id);return a+(b.balance>0?b.balance:0);},0);
-  const totalAssets=stockValue+receivables+pettyOnHand;
+  const fixedAssets=(typeof totalAssetsBookValue==='function')?totalAssetsBookValue(finTo):0;
+  const totalAssets=stockValue+receivables+pettyOnHand+fixedAssets;
   const totalLiab=payables;
   const equity=totalAssets-totalLiab;
 
@@ -5009,6 +5039,7 @@ function renderFinStatements(){
       ${row('Inventory (at cost)',stockValue,{indent:true})}
       ${row('Accounts Receivable (customers owe)',receivables,{indent:true})}
       ${row('Petty Cash on Hand',pettyOnHand,{indent:true})}
+      ${fixedAssets>0?row('Fixed Assets (net book value)',fixedAssets,{indent:true}):''}
       ${row('Total Assets',totalAssets,{bold:true,bg:'#f8fafc',head:false})}
       ${row('LIABILITIES','',{head:true,bg:'#fef2f2',color:'#991b1b',noval:true})}
       ${row('Accounts Payable (we owe suppliers)',payables,{indent:true})}
@@ -5183,6 +5214,241 @@ function exportExpensesCSV(){
   logAction('EXPENSES_EXPORTED',rows.length+' rows');
 }
 
+
+// ══════════ FIXED ASSETS & DEPRECIATION ══════════
+let assets=[]; // {id,name,category,purchaseDate,cost,usefulLife,salvage,method,notes,by,ts,disposed,disposalDate}
+let assetEditId=null;
+const ASSET_CATS=['Vehicles','Equipment','Furniture','Computers/IT','Machinery','Office Fit-out','Other'];
+// useful life (years) typical defaults
+const LIFE_DEFAULTS={'Vehicles':5,'Equipment':5,'Furniture':7,'Computers/IT':3,'Machinery':10,'Office Fit-out':10,'Other':5};
+function saveAssets(){if(typeof DEMO_MODE!=='undefined'&&DEMO_MODE){demoSave();return;}localStorage.setItem('wms_assets',JSON.stringify(assets));}
+function loadAssets(){assets=JSON.parse(localStorage.getItem('wms_assets')||'[]');}
+async function dbUpsertAsset(a){if(!SB||useLocal){saveAssets();return;}const{error}=await SB.from('assets').upsert({id:a.id,name:a.name,category:a.category||null,purchase_date:a.purchaseDate,cost:a.cost,useful_life:a.usefulLife,salvage:a.salvage||0,method:a.method||'straight',notes:a.notes||null,disposed:!!a.disposed,disposal_date:a.disposalDate||null,created_by:a.by||null,ts:a.ts});if(error){console.error('asset upsert:',error);alert('⚠ Could not save asset: '+error.message+'\nMake sure assets_setup.sql has been run.');}}
+async function dbDelAsset(id){if(!SB||useLocal){saveAssets();return;}await SB.from('assets').delete().eq('id',id);}
+async function loadAssetsFromDB(){
+  if(!SB)return;
+  try{const{data}=await SB.from('assets').select('*').order('purchase_date',{ascending:false});
+    assets=(data||[]).map(r=>({id:r.id,name:r.name,category:r.category||'',purchaseDate:r.purchase_date,cost:+r.cost||0,usefulLife:+r.useful_life||5,salvage:+r.salvage||0,method:r.method||'straight',notes:r.notes||'',disposed:!!r.disposed,disposalDate:r.disposal_date||'',by:r.created_by||'',ts:r.ts||0}));
+  }catch(e){console.error('assets load:',e);}
+}
+// Months between two dates
+function monthsBetween(from,to){const a=new Date(from),b=new Date(to);return Math.max(0,(b.getFullYear()-a.getFullYear())*12+(b.getMonth()-a.getMonth()));}
+// Accumulated depreciation up to a date (straight-line)
+function accumulatedDep(a,asOf){
+  if(!a.purchaseDate)return 0;
+  const depreciable=Math.max(0,(+a.cost||0)-(+a.salvage||0));
+  const lifeMonths=(+a.usefulLife||5)*12;
+  if(lifeMonths<=0)return depreciable;
+  const monthsUsed=Math.min(lifeMonths,monthsBetween(a.purchaseDate,asOf||new Date().toISOString().split('T')[0]));
+  return +(depreciable*(monthsUsed/lifeMonths)).toFixed(2);
+}
+function bookValue(a,asOf){return +((+a.cost||0)-accumulatedDep(a,asOf)).toFixed(2);}
+// Annual depreciation expense for a given year
+function annualDep(a,year){
+  const depreciable=Math.max(0,(+a.cost||0)-(+a.salvage||0));
+  const lifeMonths=(+a.usefulLife||5)*12;if(lifeMonths<=0)return 0;
+  const monthly=depreciable/lifeMonths;
+  const y=+year;
+  const yStart=y+'-01-01',yEndExcl=(y+1)+'-01-01'; // exclusive end = start of next year
+  const start=a.purchaseDate>yStart?a.purchaseDate:yStart;
+  if(a.purchaseDate>=yEndExcl)return 0;
+  // cap at end of life
+  const lifeEnd=new Date(a.purchaseDate);lifeEnd.setMonth(lifeEnd.getMonth()+lifeMonths);
+  const lifeEndStr=lifeEnd.toISOString().split('T')[0];
+  const realEnd=yEndExcl<lifeEndStr?yEndExcl:lifeEndStr;
+  const months=monthsBetween(start,realEnd);
+  return +(monthly*months).toFixed(2);
+}
+// Total net book value of all active assets (for Balance Sheet)
+function totalAssetsBookValue(asOf){
+  return assets.filter(a=>!a.disposed).reduce((s,a)=>s+bookValue(a,asOf),0);
+}
+
+function renderAssets(){
+  const today=new Date().toISOString().split('T')[0];
+  const active=assets.filter(a=>!a.disposed);
+  const totalCost=active.reduce((s,a)=>s+(+a.cost||0),0);
+  const totalDep=active.reduce((s,a)=>s+accumulatedDep(a,today),0);
+  const totalBook=active.reduce((s,a)=>s+bookValue(a,today),0);
+
+  document.getElementById('content').innerHTML=`
+  <div class="al al-b" style="margin-bottom:14px">🏛 Track the company's fixed assets (vehicles, equipment, computers...) and their <b>depreciation</b>. Net book value flows into the <b>Balance Sheet</b> automatically. Uses straight-line depreciation.</div>
+  ${canEditSales()?`<div class="card" style="margin-bottom:14px"><div class="ch" style="background:#eef2ff;border-bottom-color:#c7d2fe;color:#3730a3">${assetEditId?'✏ Edit Asset':'➕ Add Fixed Asset'}</div><div class="cb">
+    ${(()=>{const a=assetEditId?assets.find(x=>x.id===assetEditId):{};return`
+    <div class="frow f3" style="margin-bottom:10px">
+      <div class="fg"><label>Asset Name *</label><input id="as-name" value="${esc(a.name||'')}" placeholder="e.g. Toyota Hiace Van"/></div>
+      <div class="fg"><label>Category</label><select id="as-cat" onchange="onAssetCat(this.value)">${ASSET_CATS.map(c=>`<option ${a.category===c?'selected':''}>${c}</option>`).join('')}</select></div>
+      <div class="fg"><label>Purchase Date *</label><input type="date" id="as-date" value="${a.purchaseDate||TODAY}"/></div>
+    </div>
+    <div class="frow f3" style="margin-bottom:10px">
+      <div class="fg"><label>Cost (AED) *</label><input type="number" id="as-cost" min="0" step="0.01" value="${a.cost||''}" placeholder="0.00" oninput="calcAssetPreview()"/></div>
+      <div class="fg"><label>Useful Life (years)</label><input type="number" id="as-life" min="1" step="1" value="${a.usefulLife||5}" oninput="calcAssetPreview()"/></div>
+      <div class="fg"><label>Salvage Value (AED)</label><input type="number" id="as-salvage" min="0" step="0.01" value="${a.salvage||0}" oninput="calcAssetPreview()"/></div>
+    </div>
+    <div class="fg" style="margin-bottom:10px"><label>Notes</label><input id="as-notes" value="${esc(a.notes||'')}" placeholder="Serial no., location..."/></div>
+    <div id="as-preview" style="font-size:12px;color:var(--muted);margin-bottom:10px;padding:8px 12px;background:#f8fafc;border-radius:7px">Enter cost to see annual depreciation</div>
+    <button class="btn bbl" style="background:#4f46e5;color:#fff;padding:11px" onclick="saveAsset()">💾 ${assetEditId?'Update':'Save'} Asset</button>
+    ${assetEditId?`<button class="btn bgh" onclick="assetEditId=null;render()">Cancel</button>`:''}
+    <div id="as-msg" style="display:none;margin-top:8px;font-size:12px;font-weight:700;text-align:center"></div>`;})()}
+  </div></div>`:''}
+  <div class="kg" style="margin-bottom:14px">
+    <div class="kpi" style="border-top-color:#4f46e5"><div class="ki">🏛</div><div class="kl">Total Asset Cost</div><div class="kv" style="font-size:16px;color:#4f46e5">${fmtAED(totalCost)}</div></div>
+    <div class="kpi" style="border-top-color:#b45309"><div class="ki">📉</div><div class="kl">Accumulated Depreciation</div><div class="kv" style="font-size:16px;color:#b45309">${fmtAED(totalDep)}</div></div>
+    <div class="kpi" style="border-top-color:#059669"><div class="ki">💎</div><div class="kl">Net Book Value</div><div class="kv" style="font-size:16px;color:#059669">${fmtAED(totalBook)}</div></div>
+  </div>
+  <div class="card"><div class="ch" style="display:flex;justify-content:space-between"><span>Fixed Assets (${active.length})</span><button class="btn bb bsm no-print" onclick="exportAssetsCSV()">📄 CSV</button></div>
+    ${active.length?`<div class="tw"><table><thead><tr><th>Asset</th><th>Category</th><th>Purchased</th><th class="r">Cost</th><th class="r">Life</th><th class="r">Accum. Dep.</th><th class="r">Book Value</th>${canEditSales()?'<th></th>':''}</tr></thead><tbody>
+      ${active.map(a=>`<tr>
+        <td style="font-weight:600">${esc(a.name)}</td>
+        <td><span class="tag" style="background:#eef2ff;color:#3730a3">${esc(a.category||'—')}</span></td>
+        <td style="font-size:11px">${fD(a.purchaseDate)}</td>
+        <td class="r">${fmtAED(a.cost)}</td>
+        <td class="r" style="font-size:11px">${a.usefulLife}y</td>
+        <td class="r" style="color:#b45309">${fmtAED(accumulatedDep(a,today))}</td>
+        <td class="r b" style="color:#059669">${fmtAED(bookValue(a,today))}</td>
+        ${canEditSales()?`<td style="white-space:nowrap"><button class="btn bgh bsm" onclick="assetEditId='${a.id}';render()">✏</button> <button class="btn bgh bsm" onclick="disposeAsset('${a.id}')" title="Mark as disposed/sold">🗑</button> <button class="btn br bsm" onclick="delAsset('${a.id}')">✖</button></td>`:''}
+      </tr>`).join('')}
+      <tr class="tfoot"><td colspan="3" class="b">TOTAL</td><td class="r b">${fmtAED(totalCost)}</td><td></td><td class="r b" style="color:#b45309">${fmtAED(totalDep)}</td><td class="r b" style="color:#059669">${fmtAED(totalBook)}</td><td colspan="${canEditSales()?1:0}"></td></tr>
+    </tbody></table></div>`:`<div class="cb" style="text-align:center;color:var(--muted);padding:30px">No fixed assets recorded yet</div>`}
+  </div>
+  ${assets.some(a=>a.disposed)?`<div class="card" style="margin-top:14px"><div class="ch" style="color:var(--muted)">🗑 Disposed Assets (${assets.filter(a=>a.disposed).length})</div><div class="tw"><table><thead><tr><th>Asset</th><th>Disposed</th><th class="r">Original Cost</th>${canEditSales()?'<th></th>':''}</tr></thead><tbody>
+    ${assets.filter(a=>a.disposed).map(a=>`<tr><td>${esc(a.name)}</td><td style="font-size:11px">${fD(a.disposalDate)}</td><td class="r">${fmtAED(a.cost)}</td>${canEditSales()?`<td><button class="btn br bsm" onclick="delAsset('${a.id}')">✖</button></td>`:''}</tr>`).join('')}
+  </tbody></table></div></div>`:''}`;
+}
+function onAssetCat(cat){const el=document.getElementById('as-life');if(el&&LIFE_DEFAULTS[cat])el.value=LIFE_DEFAULTS[cat];calcAssetPreview();}
+function calcAssetPreview(){
+  const cost=+document.getElementById('as-cost')?.value||0;
+  const life=+document.getElementById('as-life')?.value||5;
+  const salvage=+document.getElementById('as-salvage')?.value||0;
+  const annual=life>0?(Math.max(0,cost-salvage)/life):0;
+  const el=document.getElementById('as-preview');
+  if(el)el.innerHTML=cost>0?`Annual depreciation: <b style="color:#b45309">${fmtAED(annual)}</b>/year · Monthly: <b>${fmtAED(annual/12)}</b> · Depreciable base: <b>${fmtAED(Math.max(0,cost-salvage))}</b>`:'Enter cost to see annual depreciation';
+}
+function saveAsset(){
+  const name=document.getElementById('as-name').value.trim();
+  const cost=+document.getElementById('as-cost').value;
+  const date=document.getElementById('as-date').value;
+  if(!name){msg('as-msg','⚠ Asset name required',false);return;}
+  if(!cost||cost<=0){msg('as-msg','⚠ Enter a valid cost',false);return;}
+  if(!date){msg('as-msg','⚠ Select purchase date',false);return;}
+  const a={id:assetEditId||uid(),name,category:document.getElementById('as-cat').value,purchaseDate:date,cost:+cost.toFixed(2),usefulLife:+document.getElementById('as-life').value||5,salvage:+document.getElementById('as-salvage').value||0,method:'straight',notes:document.getElementById('as-notes').value.trim(),disposed:false,disposalDate:'',by:currentUser?.name||'',ts:assetEditId?(assets.find(x=>x.id===assetEditId)?.ts||Date.now()):Date.now()};
+  if(assetEditId){const i=assets.findIndex(x=>x.id===assetEditId);a.disposed=assets[i].disposed;a.disposalDate=assets[i].disposalDate;assets[i]=a;}else assets.push(a);
+  dbUpsertAsset(a);saveAssets();logAction(assetEditId?'ASSET_UPDATED':'ASSET_ADDED',name+' — '+fmtAED(cost));
+  assetEditId=null;render();
+}
+async function disposeAsset(id){const a=assets.find(x=>x.id===id);if(!a)return;if(!confirm('Mark "'+a.name+'" as disposed/sold? It will be removed from the balance sheet.'))return;a.disposed=true;a.disposalDate=new Date().toISOString().split('T')[0];await dbUpsertAsset(a);saveAssets();await logAction('ASSET_DISPOSED',a.name);render();}
+async function delAsset(id){const a=assets.find(x=>x.id===id);if(!a)return;if(!confirm('Delete "'+a.name+'" permanently?'))return;assets=assets.filter(x=>x.id!==id);await dbDelAsset(id);saveAssets();await logAction('ASSET_DELETED',a.name);render();}
+function exportAssetsCSV(){
+  const today=new Date().toISOString().split('T')[0];
+  const rows=assets.filter(a=>!a.disposed).map(a=>[a.name,a.category,a.purchaseDate,a.cost.toFixed(2),a.usefulLife,a.salvage.toFixed(2),accumulatedDep(a,today).toFixed(2),bookValue(a,today).toFixed(2)]);
+  dlCSV(['Asset','Category','Purchase Date','Cost','Life (yrs)','Salvage','Accum. Depreciation','Net Book Value'],rows,'OMNIA_Assets_'+today);
+  logAction('ASSETS_EXPORTED',rows.length+' assets');
+}
+
+
+// ══════════ BOOKKEEPING — Simple Journal (unified financial ledger) ══════════
+let bkFrom='',bkTo='',bkTypeFilter='all';
+function ensureBkRange(){if(!bkFrom){const d=new Date();bkFrom=new Date(d.getFullYear(),d.getMonth(),1).toISOString().split('T')[0];bkTo=new Date(d.getFullYear(),d.getMonth()+1,0).toISOString().split('T')[0];}}
+// Build a unified journal from all financial sources
+function buildJournal(from,to){
+  const inRng=d=>(!from||d>=from)&&(!to||d<=to);
+  const J=[];
+  // Sales invoices → money in (revenue)
+  (typeof invoices!=='undefined'?invoices:[]).filter(i=>!i.cancelled&&inRng(i.date)).forEach(i=>{
+    J.push({date:i.date,type:'Sale',ref:i.invNo,party:i.customerName,debit:i.total,credit:0,account:'Sales Revenue',note:'Tax invoice'});
+  });
+  // Returns → money out (contra-revenue)
+  (typeof returns!=='undefined'?returns:[]).filter(r=>!r.cancelled&&inRng(r.date)).forEach(r=>{
+    J.push({date:r.date,type:'Return',ref:r.grvNo,party:r.customerName,debit:0,credit:r.total,account:'Sales Returns',note:'GRV'});
+  });
+  // Customer payments → cash in
+  (typeof payments!=='undefined'?payments:[]).filter(p=>!p.cancelled&&inRng(p.date)).forEach(p=>{
+    J.push({date:p.date,type:'Receipt',ref:p.rcptNo,party:p.customerName,debit:p.amount,credit:0,account:'Cash/Bank ('+(p.method||'')+')',note:'Collected by '+(p.collectedBy||p.createdBy||'—')});
+  });
+  // Expenses → money out
+  (typeof expenses!=='undefined'?expenses:[]).filter(e=>inRng(e.date)).forEach(e=>{
+    J.push({date:e.date,type:'Expense',ref:e.ref||'',party:e.vendor||'',debit:0,credit:e.gross,account:e.category||'Expense',note:e.desc||''});
+  });
+  // Petty cash
+  (typeof pettyCash!=='undefined'?pettyCash:[]).filter(e=>inRng(e.date)).forEach(e=>{
+    J.push({date:e.date,type:'Petty Cash',ref:'',party:'',debit:e.type==='in'?e.amount:0,credit:e.type==='out'?e.amount:0,account:'Petty Cash · '+(e.category||''),note:e.desc||''});
+  });
+  // Supplier purchases (POs) → liability/expense
+  (typeof supPurchases!=='undefined'?supPurchases:[]).filter(p=>p.status!=='cancelled'&&inRng(p.date)).forEach(p=>{
+    J.push({date:p.date,type:'Purchase',ref:p.poNo,party:p.supplierName,debit:0,credit:p.totalAED,account:'Inventory Purchases',note:p.currency+' '+p.totalForeign.toFixed(2)});
+  });
+  // Supplier payments → cash out
+  (typeof supPayments!=='undefined'?supPayments:[]).filter(p=>inRng(p.date)).forEach(p=>{
+    J.push({date:p.date,type:'Supplier Pmt',ref:p.ref||'',party:p.supplierName,debit:0,credit:+p.amountAED||0,account:'Cash/Bank ('+(p.method||'')+')',note:'Paid supplier'});
+  });
+  // Asset purchases → money out (capitalised)
+  (typeof assets!=='undefined'?assets:[]).filter(a=>inRng(a.purchaseDate)).forEach(a=>{
+    J.push({date:a.purchaseDate,type:'Asset',ref:'',party:a.name,debit:0,credit:a.cost,account:'Fixed Assets · '+(a.category||''),note:'Capitalised'});
+  });
+  return J.sort((a,b)=>a.date<b.date?-1:a.date>b.date?1:0);
+}
+
+const BK_TYPES=['Sale','Return','Receipt','Expense','Petty Cash','Purchase','Supplier Pmt','Asset'];
+const BK_COLORS={'Sale':'#059669','Return':'#ea580c','Receipt':'#0369a1','Expense':'#dc2626','Petty Cash':'#7c3aed','Purchase':'#b45309','Supplier Pmt':'#be123c','Asset':'#4f46e5'};
+
+function renderBookkeeping(){
+  ensureBkRange();
+  let J=buildJournal(bkFrom,bkTo);
+  if(bkTypeFilter!=='all')J=J.filter(e=>e.type===bkTypeFilter);
+  const totalDebit=J.reduce((a,e)=>a+e.debit,0);
+  const totalCredit=J.reduce((a,e)=>a+e.credit,0);
+  // counts by type
+  const byType={};buildJournal(bkFrom,bkTo).forEach(e=>{byType[e.type]=(byType[e.type]||0)+1;});
+
+  const chip=(k,lbl)=>`<button class="btn bsm" style="background:${bkTypeFilter===k?'var(--g)':'#fff'};color:${bkTypeFilter===k?'#fff':'var(--ink)'};border:1px solid var(--border)" onclick="bkTypeFilter='${k}';render()">${lbl}</button>`;
+
+  document.getElementById('content').innerHTML=`
+  <div class="al al-b" style="margin-bottom:14px">📓 <b>Simple Journal</b> — every financial transaction (sales, receipts, expenses, purchases, payments, assets) in one chronological ledger. <b>Debit</b> = money/value in, <b>Credit</b> = money/value out. Export to share with your accountant.</div>
+  <div class="card" style="margin-bottom:14px"><div class="cb" style="padding:12px;display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end" class="no-print">
+    <div class="fg" style="margin:0"><label>From</label><input type="date" value="${bkFrom}" onchange="bkFrom=this.value;render()" style="width:140px"/></div>
+    <div class="fg" style="margin:0"><label>To</label><input type="date" value="${bkTo}" onchange="bkTo=this.value;render()" style="width:140px"/></div>
+    <button class="btn bgh bsm" onclick="bkThisMonth()">This Month</button>
+    <button class="btn bgh bsm" onclick="bkThisYear()">This Year</button>
+    <div style="flex:1"></div>
+    <button class="btn bb bsm" onclick="exportJournalCSV()">📄 Export CSV</button>
+  </div></div>
+  <div class="kg" style="margin-bottom:14px">
+    <div class="kpi" style="border-top-color:#059669"><div class="ki">⬇</div><div class="kl">Total Debit (in)</div><div class="kv" style="font-size:16px;color:#059669">${fmtAED(totalDebit)}</div></div>
+    <div class="kpi" style="border-top-color:#dc2626"><div class="ki">⬆</div><div class="kl">Total Credit (out)</div><div class="kv" style="font-size:16px;color:#dc2626">${fmtAED(totalCredit)}</div></div>
+    <div class="kpi" style="border-top-color:#4DB78C"><div class="ki">📊</div><div class="kl">Net Movement</div><div class="kv" style="font-size:16px;color:${totalDebit-totalCredit>=0?'#059669':'#dc2626'}">${fmtAED(totalDebit-totalCredit)}</div></div>
+    <div class="kpi"><div class="ki">📝</div><div class="kl">Entries</div><div class="kv">${J.length}</div></div>
+  </div>
+  <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:14px" class="no-print">
+    ${chip('all','All ('+Object.values(byType).reduce((a,b)=>a+b,0)+')')}
+    ${BK_TYPES.filter(t=>byType[t]).map(t=>chip(t,t+' ('+byType[t]+')')).join('')}
+  </div>
+  <div class="card"><div class="ch">📓 Journal (${J.length})</div>
+    ${J.length?`<div class="tw"><table><thead><tr><th>Date</th><th>Type</th><th>Account</th><th>Ref</th><th>Party</th><th>Note</th><th class="r">Debit</th><th class="r">Credit</th></tr></thead><tbody>
+      ${J.map(e=>`<tr>
+        <td style="font-size:11px;white-space:nowrap">${fD(e.date)}</td>
+        <td><span class="tag" style="background:${BK_COLORS[e.type]||'#64748b'}22;color:${BK_COLORS[e.type]||'#64748b'};font-weight:700">${e.type}</span></td>
+        <td style="font-size:11px">${esc(e.account)}</td>
+        <td class="mono" style="font-size:10px;color:var(--muted)">${esc(e.ref||'—')}</td>
+        <td style="font-size:11px">${esc(e.party||'—')}</td>
+        <td style="font-size:10px;color:var(--muted);max-width:160px">${esc(e.note||'')}</td>
+        <td class="r" style="color:#059669;font-weight:${e.debit?'700':'400'}">${e.debit?fmtAED(e.debit):'—'}</td>
+        <td class="r" style="color:#dc2626;font-weight:${e.credit?'700':'400'}">${e.credit?fmtAED(e.credit):'—'}</td>
+      </tr>`).join('')}
+      <tr class="tfoot"><td colspan="6" class="b">TOTAL</td><td class="r b" style="color:#059669">${fmtAED(totalDebit)}</td><td class="r b" style="color:#dc2626">${fmtAED(totalCredit)}</td></tr>
+    </tbody></table></div>`:`<div class="cb" style="text-align:center;color:var(--muted);padding:30px">No transactions in this period</div>`}
+  </div>`;
+}
+function bkThisMonth(){const d=new Date();bkFrom=new Date(d.getFullYear(),d.getMonth(),1).toISOString().split('T')[0];bkTo=new Date(d.getFullYear(),d.getMonth()+1,0).toISOString().split('T')[0];render();}
+function bkThisYear(){const d=new Date();bkFrom=new Date(d.getFullYear(),0,1).toISOString().split('T')[0];bkTo=new Date(d.getFullYear(),11,31).toISOString().split('T')[0];render();}
+function exportJournalCSV(){
+  ensureBkRange();
+  let J=buildJournal(bkFrom,bkTo);
+  if(bkTypeFilter!=='all')J=J.filter(e=>e.type===bkTypeFilter);
+  const rows=J.map(e=>[e.date,e.type,e.account,e.ref||'',e.party||'',e.note||'',e.debit.toFixed(2),e.credit.toFixed(2)]);
+  dlCSV(['Date','Type','Account','Reference','Party','Note','Debit','Credit'],rows,'OMNIA_Journal_'+bkFrom+'_to_'+bkTo);
+  logAction('JOURNAL_EXPORTED',J.length+' entries '+bkFrom+' to '+bkTo);
+}
+
 // ── AUTO-LOGOUT AFTER IDLE (5 minutes) ──
 let idleTimer=null;
 const IDLE_MS=5*60*1000; // 5 minutes
@@ -5242,7 +5508,7 @@ document.addEventListener('DOMContentLoaded',()=>{injectLogos();startClock();sta
         if(savedUser&&savedUser.email!=='offline'){
           currentUser=savedUser;
           updateUserUI();
-          await loadFromDB();await loadSalesFromDB();await loadReturnsFromDB();await loadDNFromDB();await loadApprovalsFromDB();await loadPaymentsFromDB();await loadPettyFromDB();await loadSupFromDB();await loadSupPayFromDB();await loadExpFromDB();subscribeRealtime();go('dashboard');
+          await loadFromDB();await loadSalesFromDB();await loadReturnsFromDB();await loadDNFromDB();await loadApprovalsFromDB();await loadPaymentsFromDB();await loadPettyFromDB();await loadSupFromDB();await loadSupPayFromDB();await loadExpFromDB();await loadAssetsFromDB();subscribeRealtime();go('dashboard');
           return;
         }
       }
