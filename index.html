@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width,initial-scale=1.0"/>
 <title>OMNIA — Warehouse Management System</title>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
 <style>
 :root{--g:#4DB78C;--gd:#3a9b76;--gl:#e8f8f2;--dark:#0c1a27;--sb:#0f2132;
 --text:#1e293b;--muted:#64748b;--border:#e2e8f0;--bg:#f0f4f8;--w:#fff;
@@ -312,7 +313,7 @@ input:focus,select:focus,textarea:focus{border-color:var(--g);background:var(--w
       <div><h1 id="ptitle">Dashboard</h1><div class="topbar-sub" id="psub">Inventory overview</div></div>
     </div>
     <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center" class="no-print">
-      <button class="btn bgh bsm" onclick="exportCSV()">📄 CSV</button>
+      <button class="btn bgh bsm" onclick="exportCSV()">📊 Excel</button>
       <button class="btn bd bsm" onclick="window.print()">🖨 PDF</button>
       <button class="btn br bsm" id="mob-logout" onclick="doLogout()" style="display:none">🚪</button>
     </div>
@@ -1067,21 +1068,101 @@ async function runCleanup(){
   render();
 }
 
-// ── EXPORT CSV ───────────────────────────────────
+// ── EXPORT (Excel .xlsx — formatted, professional) ───────────────────────────
+// Strip emojis & symbol clutter from text (for clean Excel cells)
+function stripEmoji(s){return String(s||'').replace(/[\u{1F000}-\u{1FFFF}\u{2600}-\u{27BF}\u{2190}-\u{21FF}\u{2B00}-\u{2BFF}\u{FE0F}\u{200D}]/gu,'').replace(/\s+/g,' ').trim();}
 function exportCSV(){
   const lm=locMap();
   if(curPage==='log'){
     const h=['Date','Type','Location/From','To','SKU','Product','Cases','Pieces','Total Pcs','Batch','Expiry Date','Customer','Driver/Received By','Ref','Created By','Notes'];
-    const r=movements.slice().reverse().map(m=>{const p=prodMap()[m.sku]||{};const ppc=getPPC(m.sku);return[m.date,m.type,lm[m.locId||m.fromLoc]?.name||'',lm[m.toLoc]?.name||'',m.sku,p.name||'',m.cases,m.pcs||0,(m.cases*ppc)+(+m.pcs||0),m.batch||'',m.expiry||'',m.party||'',m.driver||'',m.ref||'',m.createdBy||'',m.notes||''];});
-    dlCSV(h,r,'OMNIA_Movements_'+TODAY);return;
+    const r=movements.slice().reverse().map(m=>{const p=prodMap()[m.sku]||{};const ppc=getPPC(m.sku);return[m.date,m.type,stripEmoji(lm[m.locId||m.fromLoc]?.name||''),stripEmoji(lm[m.toLoc]?.name||''),m.sku,stripEmoji(p.name||''),m.cases,m.pcs||0,(m.cases*ppc)+(+m.pcs||0),m.batch||'',m.expiry||'',stripEmoji(m.party||''),stripEmoji(m.driver||''),m.ref||'',stripEmoji(m.createdBy||''),stripEmoji(m.notes||'')];});
+    exportXLSX(h,r,'OMNIA_Movements_'+TODAY,'Movements Log');return;
   }
   const locIds=curPage.startsWith('rep-')&&curPage!=='rep-all'?[curPage.replace('rep-','')]:locs.map(l=>l.id);
-  const h=['SKU','Product','Category','PPC','Location','Opening (pcs)','Stock In (pcs)','Transfer In (pcs)','Stock Out (pcs)','Adjustment (pcs)','Closing (pcs)','Closing Cases','Closing Pieces','Cost/Unit','Stock Value'];
+  const single=locIds.length===1;
+  const h=['SKU','Product','Category','Units/Case','Location','Batch No.','Expiry Date','Days to Expiry','Expiry Status','Qty (pcs)','Qty (Cases)','Qty (Pcs)','Cost/Unit (AED)','Batch Value (AED)'];
   const r=[];
-  locIds.forEach(lid=>{products.forEach(p=>{const ppc=getPPC(p.sku);const ob=getOB(lid,p.sku),si=getIn(lid,p.sku),ti=getTfIn(lid,p.sku),so=getOut(lid,p.sku),adj=getAdj(lid,p.sku),cl=ob+si+ti-so+adj;r.push([p.sku,p.name,p.cat,ppc,lm[lid]?.name||lid,ob,si,ti,so,adj,cl,Math.floor(cl/ppc),cl%ppc,p.cost||0,(cl*(p.cost||0)).toFixed(2)]);});});
-  dlCSV(h,r,'OMNIA_Stock_'+curPage+'_'+TODAY);
+  locIds.forEach(lid=>{products.forEach(p=>{
+    const ppc=getPPC(p.sku);
+    const batches=getBatchStock(lid,p.sku); // [{expiry,batch,qty}] sorted by date
+    if(!batches.length)return; // no stock at this location → skip
+    batches.forEach(b=>{
+      const days=b.expiry?daysUntilExpiry(b.expiry):null;
+      let expStatus='';
+      if(b.expiry){if(days<0)expStatus='EXPIRED';else if(days<=30)expStatus='Expiring soon';else if(days<=90)expStatus='Watch';else expStatus='OK';}
+      else expStatus='No expiry';
+      r.push([p.sku,stripEmoji(p.name),stripEmoji(p.cat),ppc,stripEmoji(lm[lid]?.name||lid),b.batch||'—',b.expiry||'—',b.expiry?days:'',expStatus,b.qty,Math.floor(b.qty/ppc),b.qty%ppc,(+p.cost||0),+(b.qty*(p.cost||0)).toFixed(2)]);
+    });
+  });});
+  const title=single?('Stock by Expiry — '+stripEmoji(lm[locIds[0]]?.name||locIds[0])):'Stock by Expiry — All Locations';
+  exportXLSX(h,r,'OMNIA_Stock_Report_'+TODAY,title);
 }
-function dlCSV(h,r,fn){const csv=[h,...r].map(row=>row.map(c=>`"${String(c).replace(/"/g,'""')}"`).join(',')).join('\n');const b=new Blob([csv],{type:'text/csv'});const a=document.createElement('a');a.href=URL.createObjectURL(b);a.download=fn+'.csv';a.click();}
+// Professional Excel writer: bold coloured header, auto widths, frozen header, number formats
+function exportXLSX(headers,rows,filename,sheetTitle){
+  if(typeof XLSX==='undefined'){dlCSV(headers,rows,filename);return;} // fallback if lib not loaded
+  const wb=XLSX.utils.book_new();
+  // Title row + generated date + header + data
+  const meta=[
+    ['OMNIA FOOD TRADING LLC'],
+    [sheetTitle||'Report'],
+    ['Generated: '+new Date().toLocaleString('en-GB')+'  ·  TRN: 100 3285 58 00003'],
+    [],
+  ];
+  const aoa=[...meta,headers,...rows];
+  const ws=XLSX.utils.aoa_to_sheet(aoa);
+  const nCols=headers.length;
+  const lastCol=XLSX.utils.encode_col(nCols-1);
+  // Merge title rows across all columns
+  ws['!merges']=[
+    {s:{r:0,c:0},e:{r:0,c:nCols-1}},
+    {s:{r:1,c:0},e:{r:1,c:nCols-1}},
+    {s:{r:2,c:0},e:{r:2,c:nCols-1}},
+  ];
+  // Column widths (auto from content, capped)
+  ws['!cols']=headers.map((hh,i)=>{
+    let max=String(hh).length;
+    rows.forEach(rw=>{const v=rw[i]==null?'':String(rw[i]);if(v.length>max)max=v.length;});
+    return {wch:Math.min(Math.max(max+2,8),40)};
+  });
+  // Freeze below header row (row index 4 = the headers, data starts row 5)
+  ws['!freeze']={xSplit:0,ySplit:5,topLeftCell:'A6',activePane:'bottomLeft',state:'frozen'};
+  // ── Styling ──
+  const GREEN='4DB78C',DARK='0C1A27';
+  const setStyle=(addr,style)=>{if(ws[addr])ws[addr].s=style;};
+  // Company title
+  setStyle('A1',{font:{bold:true,sz:15,color:{rgb:'FFFFFF'}},fill:{fgColor:{rgb:DARK}},alignment:{horizontal:'center',vertical:'center'}});
+  setStyle('A2',{font:{bold:true,sz:13,color:{rgb:GREEN}},fill:{fgColor:{rgb:DARK}},alignment:{horizontal:'center'}});
+  setStyle('A3',{font:{sz:9,color:{rgb:'B8C2CC'}},fill:{fgColor:{rgb:DARK}},alignment:{horizontal:'center'}});
+  // Header row (row 5 → index 4)
+  for(let c=0;c<nCols;c++){
+    const addr=XLSX.utils.encode_cell({r:4,c});
+    setStyle(addr,{font:{bold:true,sz:11,color:{rgb:'FFFFFF'}},fill:{fgColor:{rgb:GREEN}},alignment:{horizontal:'center',vertical:'center',wrapText:true},border:{bottom:{style:'medium',color:{rgb:DARK}}}});
+  }
+  // Data rows: zebra + number formats + expiry status colours
+  const expStatusCol=headers.indexOf('Expiry Status');
+  const valueCol=headers.indexOf('Batch Value (AED)')>=0?headers.indexOf('Batch Value (AED)'):headers.indexOf('Stock Value (AED)');
+  const costCol=headers.indexOf('Cost/Unit (AED)');
+  const qtyCol=headers.indexOf('Qty (pcs)');
+  for(let ri=0;ri<rows.length;ri++){
+    const excelRow=5+ri;const zebra=ri%2===1;
+    for(let c=0;c<nCols;c++){
+      const addr=XLSX.utils.encode_cell({r:excelRow,c});if(!ws[addr])continue;
+      const st={font:{sz:10},alignment:{vertical:'center'},border:{bottom:{style:'thin',color:{rgb:'E2E8F0'}}}};
+      if(zebra)st.fill={fgColor:{rgb:'F6FBF9'}};
+      if(c===valueCol||c===costCol){st.numFmt='#,##0.00';st.alignment.horizontal='right';st.font.bold=(c===valueCol);}
+      else if(c===qtyCol){st.numFmt='#,##0';st.alignment.horizontal='center';st.font.bold=true;}
+      else if(c>=3&&c<=12){st.alignment.horizontal='center';}
+      // Expiry status colour
+      if(c===expStatusCol){const v=rows[ri][c];if(v==='EXPIRED'){st.font.color={rgb:'B91C1C'};st.font.bold=true;}else if(v==='Expiring soon'){st.font.color={rgb:'C2410C'};st.font.bold=true;}else if(v==='Watch'){st.font.color={rgb:'B45309'};}else if(v==='OK'){st.font.color={rgb:'059669'};}else if(v==='No expiry'){st.font.color={rgb:'94A3B8'};}}
+      setStyle(addr,st);
+    }
+  }
+  ws['!rows']=[{hpt:22},{hpt:20},{hpt:16},{hpt:6},{hpt:26}];
+  XLSX.utils.book_append_sheet(wb,ws,(sheetTitle||'Report').slice(0,28));
+  XLSX.writeFile(wb,filename+'.xlsx');
+  try{logAction('REPORT_EXPORTED',filename+' ('+rows.length+' rows, Excel)');}catch(e){}
+}
+function dlCSV(h,r,fn){const csv=[h,...r].map(row=>row.map(c=>`"${String(c).replace(/"/g,'""')}"`).join(',')).join('\n');const b=new Blob(['\ufeff'+csv],{type:'text/csv;charset=utf-8'});const a=document.createElement('a');a.href=URL.createObjectURL(b);a.download=fn+'.csv';a.click();}
 
 // ── RENDER ROUTER ────────────────────────────────
 function render(){
