@@ -479,22 +479,46 @@ function ROLES_get(role){
 const ROLES=new Proxy({},{get(t,role){return ROLES_get(role);},has(t,role){return role in DEFAULT_ROLES||role in roleOverrides;}});
 const ROLE_LABELS={admin:'👑 Admin',management:'🛡️ Management',accountant:'🧮 Accountant',inventory:'📦 Inventory',sales:'🧾 Sales',viewer:'👁 Viewer (Read-only)',custom:'⚙ Custom'};
 const EDITABLE_ROLES=['inventory','sales','accountant','management','viewer'];
+// Roles that require management approval for financial entries (expense/payment/petty cash)
+let roleFinApproval={}; // {roleName:true}
+function needsFinApproval(){
+  if(!currentUser)return false;
+  const r=normRole(currentUser.role);
+  if(r==='admin'||r==='management')return false; // approvers never need approval
+  return !!roleFinApproval[r];
+}
+function saveRoleFinApproval(){if(typeof DEMO_MODE!=='undefined'&&DEMO_MODE)return;localStorage.setItem('wms_role_finappr',JSON.stringify(roleFinApproval));}
+function loadRoleFinApproval(){try{roleFinApproval=JSON.parse(localStorage.getItem('wms_role_finappr')||'{}');}catch(e){roleFinApproval={};}}
 function saveRoleOverrides(){if(typeof DEMO_MODE!=='undefined'&&DEMO_MODE)return;localStorage.setItem('wms_role_overrides',JSON.stringify(roleOverrides));}
 function loadRoleOverrides(){try{roleOverrides=JSON.parse(localStorage.getItem('wms_role_overrides')||'{}');}catch(e){roleOverrides={};}}
 async function loadRoleOverridesFromDB(){
   if(!SB)return;
   try{const{data}=await SB.from('role_permissions').select('*');
-    roleOverrides={};(data||[]).forEach(r=>{if(r.role&&Array.isArray(r.pages))roleOverrides[r.role]=r.pages;});
-    saveRoleOverrides();
+    roleOverrides={};roleFinApproval={};
+    (data||[]).forEach(r=>{
+      if(r.role&&Array.isArray(r.pages))roleOverrides[r.role]=r.pages;
+      if(r.role&&r.needs_fin_approval)roleFinApproval[r.role]=true;
+    });
+    saveRoleOverrides();saveRoleFinApproval();
   }catch(e){console.error('role_permissions load:',e);}
 }
 async function saveRolePermission(role,pages){
   roleOverrides[role]=pages;saveRoleOverrides();
   if(SB&&!useLocal){
-    try{await SB.from('role_permissions').upsert({role,pages,updated_by:currentUser?.name||'',updated_at:new Date().toISOString()});}
+    try{await SB.from('role_permissions').upsert({role,pages,needs_fin_approval:!!roleFinApproval[role],updated_by:currentUser?.name||'',updated_at:new Date().toISOString()});}
     catch(e){console.error('role_permissions save:',e);alert('⚠ Could not save to server: '+e.message+'\nMake sure role_permissions_setup.sql has been run.');}
   }
   await logAction('ROLE_PERMISSIONS_UPDATED',role+' → '+pages.length+' pages');
+}
+async function setRoleFinApproval(role,needs){
+  roleFinApproval[role]=needs;if(!needs)delete roleFinApproval[role];
+  saveRoleFinApproval();
+  const pages=roleOverrides[role]||(Array.isArray(ROLES_get(role))?ROLES_get(role):[]);
+  if(SB&&!useLocal){
+    try{await SB.from('role_permissions').upsert({role,pages,needs_fin_approval:!!needs,updated_by:currentUser?.name||'',updated_at:new Date().toISOString()});}
+    catch(e){console.error('fin approval save:',e);}
+  }
+  await logAction('ROLE_FIN_APPROVAL_'+(needs?'ON':'OFF'),role);
 }
 async function resetRolePermission(role){
   delete roleOverrides[role];saveRoleOverrides();
@@ -515,6 +539,11 @@ async function resetRole(role){
   await resetRolePermission(role);
   if(currentUser&&normRole(currentUser.role)===role){try{updateUserUI();}catch(e){}}
   render();
+}
+async function toggleRoleFinApproval(role,needs){
+  await setRoleFinApproval(role,needs);
+  const m=document.getElementById('rp-msg');
+  if(m){m.style.display='block';m.style.color=needs?'#92400e':'#059669';m.textContent=needs?'🔒 '+ROLE_LABELS[role]+' now needs approval for financial entries.':'✓ '+ROLE_LABELS[role]+' no longer needs financial approval.';}
 }
 function normRole(r){return r==='limited'?'sales':(r||'sales');}
 function rolePages(u){
@@ -980,6 +1009,63 @@ function closeSb(){
   if(x)x.style.display='none';
 }
 function closeModal(){document.getElementById('modal').classList.remove('open');}
+// ── ADMIN CLEANUP TOOL — clear stock entries to start fresh ──
+function openCleanupTool(){
+  if(currentUser?.role!=='admin'){alert('Admin only');return;}
+  const counts={IN:movements.filter(m=>m.type==='IN').length,OUT:movements.filter(m=>m.type==='OUT').length,ADJ:movements.filter(m=>m.type==='ADJ').length,TF:movements.filter(m=>m.type==='TF').length};
+  document.getElementById('modal-title').textContent='🧹 Cleanup Stock Data';
+  document.getElementById('modal-body').innerHTML=`
+    <div class="al no-print" style="background:#fef2f2;border-color:#fecaca;color:#991b1b;margin-bottom:14px">⚠️ <b>Danger zone — Admin only.</b> This permanently deletes stock movements so you can start fresh. This <b>cannot be undone</b>. Take a Backup first (Users → Backup All Data).</div>
+    <div style="display:flex;flex-direction:column;gap:8px">
+      <label style="display:flex;align-items:center;gap:10px;background:#f0fdf4;border:1px solid #bbf7d0;border-radius:8px;padding:11px 13px;cursor:pointer;margin:0">
+        <input type="checkbox" id="cl-in" style="width:17px;height:17px"/>
+        <span style="font-weight:700">📥 Stock In entries</span><span style="margin-left:auto;color:#059669;font-weight:700">${counts.IN}</span></label>
+      <label style="display:flex;align-items:center;gap:10px;background:#faf5ff;border:1px solid #e9d5ff;border-radius:8px;padding:11px 13px;cursor:pointer;margin:0">
+        <input type="checkbox" id="cl-adj" style="width:17px;height:17px"/>
+        <span style="font-weight:700">⚖ Adjustments</span><span style="margin-left:auto;color:#8b5cf6;font-weight:700">${counts.ADJ}</span></label>
+      <label style="display:flex;align-items:center;gap:10px;background:#fef2f2;border:1px solid #fecaca;border-radius:8px;padding:11px 13px;cursor:pointer;margin:0">
+        <input type="checkbox" id="cl-out" style="width:17px;height:17px"/>
+        <span style="font-weight:700">📤 Stock Out entries</span><span style="margin-left:auto;color:#dc2626;font-weight:700">${counts.OUT}</span></label>
+      <label style="display:flex;align-items:center;gap:10px;background:#eff6ff;border:1px solid #bfdbfe;border-radius:8px;padding:11px 13px;cursor:pointer;margin:0">
+        <input type="checkbox" id="cl-tf" style="width:17px;height:17px"/>
+        <span style="font-weight:700">🔄 Transfers</span><span style="margin-left:auto;color:#2563eb;font-weight:700">${counts.TF}</span></label>
+    </div>
+    <div style="margin-top:14px;padding:12px;background:#fffbeb;border:1px solid #fcd34d;border-radius:8px">
+      <label style="font-size:12px;font-weight:700;color:#92400e;display:block;margin-bottom:6px">To confirm, type <b>DELETE</b> below:</label>
+      <input id="cl-confirm" placeholder="Type DELETE" style="width:100%;padding:9px;border:1.5px solid #fcd34d;border-radius:7px"/>
+    </div>
+    <div style="display:flex;gap:8px;margin-top:14px">
+      <button class="btn br bbl" onclick="runCleanup()">🗑 Delete Selected</button>
+      <button class="btn bgh" onclick="closeModal()">Cancel</button>
+    </div>
+    <div id="cl-msg" style="display:none;margin-top:10px;font-size:12px;font-weight:700;text-align:center"></div>`;
+  document.getElementById('modal').classList.add('open');
+}
+async function runCleanup(){
+  if(currentUser?.role!=='admin')return;
+  const confirm=document.getElementById('cl-confirm').value.trim();
+  if(confirm!=='DELETE'){msg('cl-msg','⚠ Type DELETE to confirm',false);return;}
+  const types=[];
+  if(document.getElementById('cl-in').checked)types.push('IN');
+  if(document.getElementById('cl-adj').checked)types.push('ADJ');
+  if(document.getElementById('cl-out').checked)types.push('OUT');
+  if(document.getElementById('cl-tf').checked)types.push('TF');
+  if(!types.length){msg('cl-msg','⚠ Select at least one type to delete',false);return;}
+  const toDelete=movements.filter(m=>types.includes(m.type));
+  if(!toDelete.length){msg('cl-msg','Nothing to delete for the selected types',false);return;}
+  msg('cl-msg','⏳ Deleting '+toDelete.length+' entries...',true);
+  // delete from DB in bulk where possible
+  if(SB&&!useLocal){
+    try{for(const t of types){await SB.from('movements').delete().eq('type',t);}}
+    catch(e){console.error('cleanup DB:',e);msg('cl-msg','⚠ DB error: '+e.message,false);return;}
+  }
+  movements=movements.filter(m=>!types.includes(m.type));
+  save();
+  await logAction('DATA_CLEANUP','Deleted '+toDelete.length+' entries ('+types.join(', ')+')');
+  closeModal();
+  alert('✅ Deleted '+toDelete.length+' entries. You can now start fresh.');
+  render();
+}
 
 // ── EXPORT CSV ───────────────────────────────────
 function exportCSV(){
@@ -1564,6 +1650,7 @@ function renderLog(){
     <button class="btn br bsm" onclick="go('out')">+ Stock Out</button>
     <button class="btn bb bsm" onclick="go('transfer')">+ Transfer</button>
     <button class="btn bsm" style="background:#8b5cf6;color:#fff" onclick="go('adjust')">+ Adjust</button>
+    ${currentUser?.role==='admin'?`<div style="flex:1"></div><button class="btn br bsm" onclick="openCleanupTool()" title="Admin: clear stock entries to start fresh">🧹 Cleanup Data</button>`:''}
   </div>
   <div class="card"><div class="ch">All Movements (${sorted.length} entries)</div>
     ${sorted.length?`<div class="tw"><table class="fixed"><thead><tr>
@@ -1927,7 +2014,7 @@ function openProdModal(id){
 function renderOpening(){
   document.getElementById('content').innerHTML=`
   <div class="al al-b no-print">ℹ️ Set the opening (initial) stock balance for each product per location before recording movements.</div>
-  <div class="al al-b no-print" style="margin-bottom:12px">ℹ️ Set the opening (initial) stock here so it shows in reports. When you later add <b>Batches with expiry dates</b> for a product (Products → 📅) or record <b>Stock In</b>, the system automatically uses those batches and ignores this opening balance — so stock is never double-counted.</div>
+  <div class="al al-b no-print" style="margin-bottom:12px">ℹ️ Opening Balance is your <b>starting stock</b> (before you began using the system). <b>Recommended:</b> leave this at 0 and enter all stock via <b>📥 Stock In</b> with expiry dates. ⚠️ Do not enter the same product in both Opening Balance and Stock In — it will be counted twice.</div>
   ${locs.map(loc=>`
   <div class="card" style="margin-bottom:12px">
     <div class="ch">${loc.icon} ${esc(loc.name)}</div>
@@ -2038,7 +2125,7 @@ function save2(){
   localStorage.setItem('wms_invoices',JSON.stringify(invoices));
 }
 function load2(){
-  customers=JSON.parse(localStorage.getItem('wms_customers')||'[]');loadRet();loadDN();loadAppr();loadPay();loadPetty();loadSup();loadExp();loadAssets();loadSupPay();loadRoleOverrides();
+  customers=JSON.parse(localStorage.getItem('wms_customers')||'[]');loadRet();loadDN();loadAppr();loadPay();loadPetty();loadSup();loadExp();loadAssets();loadSupPay();loadRoleOverrides();loadRoleFinApproval();
   invoices=JSON.parse(localStorage.getItem('wms_invoices')||'[]');
   auditLog=JSON.parse(localStorage.getItem('wms_audit')||'[]');
 }
@@ -2076,7 +2163,14 @@ function renderApprovals(){
   }
   const pending=approvals.filter(a=>a.status==='pending').sort((a,b)=>b.ts-a.ts);
   const decided=approvals.filter(a=>a.status!=='pending').sort((a,b)=>(b.decidedTs||b.ts)-(a.decidedTs||a.ts)).slice(0,50);
-  const kindLbl=k=>k==='cancel'?'<span class="tag" style="background:#fee2e2;color:#b91c1c">✖ CANCEL</span>':'<span class="tag" style="background:#dbeafe;color:#1e40af">✏ EDIT</span>';
+  const kindLbl=k=>{
+    if(k==='cancel')return'<span class="tag" style="background:#fee2e2;color:#b91c1c">✖ CANCEL INVOICE</span>';
+    if(k==='edit')return'<span class="tag" style="background:#dbeafe;color:#1e40af">✏ EDIT INVOICE</span>';
+    if(k==='fin-expense')return'<span class="tag" style="background:#fef2f2;color:#dc2626">💸 EXPENSE</span>';
+    if(k==='fin-payment')return'<span class="tag" style="background:#f0fdf4;color:#059669">💵 PAYMENT</span>';
+    if(k==='fin-petty')return'<span class="tag" style="background:#faf5ff;color:#7c3aed">💰 PETTY CASH</span>';
+    return'<span class="tag">'+esc(k)+'</span>';
+  };
   const statLbl=s=>s==='approved'?'<span class="tag" style="background:#dcfce7;color:#15803d">✓ APPROVED</span>':s==='rejected'?'<span class="tag" style="background:#fee2e2;color:#b91c1c">✖ REJECTED</span>':'<span class="tag" style="background:#fef3c7;color:#b45309">⏳ PENDING</span>';
   document.getElementById('content').innerHTML=`
   ${canApprove()?'<div class="al al-g" style="margin-bottom:14px;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px"><span>👑 As management, you can approve or reject invoice edit/cancel requests from the sales team.</span><button class="btn bg bsm" onclick="refreshApprovals()">🔄 Refresh</button></div>':'<div class="al al-b" style="margin-bottom:14px">These are your invoice edit/cancel requests and their status. Once approved, go to Tax Invoices and perform the action.</div>'}
@@ -2167,8 +2261,35 @@ async function decideApproval(id,decision){
   const a=approvals.find(x=>x.id===id);if(!a||!canApprove())return;
   a.status=decision;a.decidedBy=currentUser?.name||'';a.decidedTs=Date.now();
   await dbUpdateApproval(a);
-  await logAction(decision==='approved'?'APPROVAL_GRANTED':'APPROVAL_REJECTED',(a.kind==='cancel'?'Cancel':'Edit')+' '+a.targetNo+' — requested by '+a.requestedBy);
+  // Financial approvals: flip the underlying record's status
+  if(a.kind&&a.kind.startsWith('fin-')){
+    await applyFinDecision(a,decision);
+  }
+  await logAction(decision==='approved'?'APPROVAL_GRANTED':'APPROVAL_REJECTED',(a.kind||'')+' '+a.targetNo+' — requested by '+a.requestedBy);
   saveAppr();render();
+}
+// Create a financial approval request (expense/payment/petty)
+async function createFinApproval(type,targetId,label,amount){
+  const a={id:uid(),kind:'fin-'+type,targetId,targetNo:label,requestedBy:currentUser?.name||'',reason:'Amount: '+fmtAED(amount),status:'pending',ts:Date.now()};
+  approvals.push(a);
+  await dbInsertApproval(a);
+  await logAction('FIN_APPROVAL_REQUESTED','fin-'+type+' '+label);
+  saveAppr();
+}
+// Apply approve/reject to the underlying expense/payment/petty record
+async function applyFinDecision(a,decision){
+  const type=a.kind.replace('fin-','');
+  const newStatus=decision==='approved'?'approved':'rejected';
+  if(type==='expense'){
+    const e=expenses.find(x=>x.id===a.targetId);
+    if(e){e.status=newStatus;saveExp();if(SB&&!useLocal){try{await SB.from('expenses').update({status:newStatus}).eq('id',e.id);}catch(err){console.error(err);}}}
+  }else if(type==='payment'){
+    const p=payments.find(x=>x.id===a.targetId);
+    if(p){p.status=newStatus;savePay();if(SB&&!useLocal){try{await SB.from('payments').update({status:newStatus}).eq('id',p.id);}catch(err){console.error(err);}}}
+  }else if(type==='petty'){
+    const p=pettyCash.find(x=>x.id===a.targetId);
+    if(p){p.status=newStatus;savePetty();if(SB&&!useLocal){try{await SB.from('petty_cash').update({status:newStatus}).eq('id',p.id);}catch(err){console.error(err);}}}
+  }
 }
 async function consumeApproval(a){
   a.used=true;await dbUpdateApproval(a);saveAppr();
@@ -3150,7 +3271,14 @@ function renderUsers(){
             <input type="checkbox" class="rp-cb" value="${pg}" ${curArr.includes(pg)?'checked':''} style="width:16px;height:16px;flex-shrink:0"/>${lbl}</label>`).join('')}
         </div></div>`).join('')}
       </div>
-      <button class="btn bg bbl" style="margin-top:6px" onclick="saveRoleEdit('${rp}')">💾 Save ${ROLE_LABELS[rp]} Permissions</button>
+      <div style="margin-top:14px;padding:12px;background:#fffbeb;border:1px solid #fcd34d;border-radius:9px">
+        <label style="display:flex;align-items:center;gap:10px;cursor:pointer;margin:0;font-size:12px;font-weight:700;color:#92400e">
+          <input type="checkbox" id="rp-finappr" ${roleFinApproval[rp]?'checked':''} onchange="toggleRoleFinApproval('${rp}',this.checked)" style="width:17px;height:17px;flex-shrink:0"/>
+          🔒 Require management approval for this role's <b>Expenses, Payments & Petty Cash</b>
+        </label>
+        <div style="font-size:11px;color:#a16207;margin-top:5px;padding-left:27px">When ON, financial entries by ${ROLE_LABELS[rp]} are saved as <b>"pending"</b> and don't count in reports until management approves them in the Approvals page.</div>
+      </div>
+      <button class="btn bg bbl" style="margin-top:12px" onclick="saveRoleEdit('${rp}')">💾 Save ${ROLE_LABELS[rp]} Permissions</button>
       <div id="rp-msg" style="display:none;margin-top:8px;font-size:12px;font-weight:700;text-align:center"></div>
     </div></div>`;
   })()}
@@ -3815,14 +3943,14 @@ async function savePayment(){
     method:document.getElementById('pay-method').value,ref:document.getElementById('pay-ref').value.trim(),
     againstInv:document.getElementById('pay-inv').value.trim(),notes:document.getElementById('pay-notes').value.trim(),
     collectedBy:(document.getElementById('pay-collector')?document.getElementById('pay-collector').value.trim():''),
-    createdBy:currentUser?.name||'',ts:Date.now()};
+    createdBy:currentUser?.name||'',status:needsFinApproval()?'pending':'approved',ts:Date.now()};
   payments.push(p);await dbInsertPayment(p);
-  // auto-mark invoice paid if full payment against it
-  if(p.againstInv){const inv=invoices.find(i=>i.invNo===p.againstInv&&!i.cancelled);if(inv&&p.amount>=inv.total-0.01&&inv.payStatus!=='paid'){inv.payStatus='paid';inv.paidAt=Date.now();await dbUpdateInvoice(inv);}}
-  await logAction('PAYMENT_RECEIVED','Receipt '+p.rcptNo+' — '+custName+' — '+fmtAED(p.amount)+(p.againstInv?' against '+p.againstInv:' (on account)'));
+  // auto-mark invoice paid if full payment against it (only if approved)
+  if(p.againstInv&&p.status==='approved'){const inv=invoices.find(i=>i.invNo===p.againstInv&&!i.cancelled);if(inv&&p.amount>=inv.total-0.01&&inv.payStatus!=='paid'){inv.payStatus='paid';inv.paidAt=Date.now();await dbUpdateInvoice(inv);}}
+  await logAction('PAYMENT_RECEIVED','Receipt '+p.rcptNo+' — '+custName+' — '+fmtAED(p.amount)+(p.againstInv?' against '+p.againstInv:' (on account)')+(p.status==='pending'?' [PENDING APPROVAL]':''));
   savePay();
-  msg('pay-msg','✅ Receipt '+p.rcptNo+' saved!',true);
-  setTimeout(()=>{render();printReceipt(p.id);},800);
+  if(p.status==='pending'){await createFinApproval('payment',p.id,'Receipt '+p.rcptNo+' '+custName,p.amount);msg('pay-msg','✅ Receipt submitted — pending management approval before it counts in reports.',true);setTimeout(()=>render(),900);}
+  else{msg('pay-msg','✅ Receipt '+p.rcptNo+' saved!',true);setTimeout(()=>{render();printReceipt(p.id);},800);}
 }
 async function cancelPayment(id){const p=payments.find(x=>x.id===id);if(!p||p.cancelled)return;if(!confirm('Cancel receipt '+p.rcptNo+'?'))return;p.cancelled=true;await dbUpdatePayment(p);savePay();await logAction('PAYMENT_CANCELLED',p.rcptNo+' — '+p.customerName);render();}
 function exportPaymentsCSV(){
@@ -4509,11 +4637,11 @@ function inRange(date){return (!cashFrom||date>=cashFrom)&&(!cashTo||date<=cashT
 
 // Collected cash within range (method = cash), grouped
 function cashCollected(){
-  return payments.filter(p=>!p.cancelled&&p.method==='cash'&&inRange(p.date));
+  return payments.filter(p=>!p.cancelled&&isApprovedRec(p)&&p.method==='cash'&&inRange(p.date));
 }
 function allCollectedByMethod(){
   const map={};
-  payments.filter(p=>!p.cancelled&&inRange(p.date)).forEach(p=>{map[p.method||'other']=(map[p.method||'other']||0)+p.amount;});
+  payments.filter(p=>!p.cancelled&&isApprovedRec(p)&&inRange(p.date)).forEach(p=>{map[p.method||'other']=(map[p.method||'other']||0)+p.amount;});
   return map;
 }
 
@@ -4642,11 +4770,12 @@ async function savePetty2(){
   const amount=+document.getElementById('pc-amount').value;
   if(!date){msg('pc-msg','⚠ Select date',false);return;}
   if(!amount||amount<=0){msg('pc-msg','⚠ Enter a valid amount',false);return;}
-  const e={id:uid(),date,type,amount:+amount.toFixed(2),category:document.getElementById('pc-cat').value,desc:document.getElementById('pc-desc').value.trim(),by:currentUser?.name||'',ts:Date.now()};
+  const e={id:uid(),date,type,amount:+amount.toFixed(2),category:document.getElementById('pc-cat').value,desc:document.getElementById('pc-desc').value.trim(),by:currentUser?.name||'',status:needsFinApproval()?'pending':'approved',ts:Date.now()};
   pettyCash.push(e);await dbInsertPetty(e);savePetty();
-  await logAction('PETTY_CASH_'+(type==='in'?'IN':'OUT'),fmtAED(amount)+' — '+e.category+(e.desc?' ('+e.desc+')':''));
-  msg('pc-msg','✅ Saved!',true);
-  setTimeout(()=>render(),600);
+  await logAction('PETTY_CASH_'+(type==='in'?'IN':'OUT'),fmtAED(amount)+' — '+e.category+(e.desc?' ('+e.desc+')':'')+(e.status==='pending'?' [PENDING APPROVAL]':''));
+  if(e.status==='pending'){await createFinApproval('petty',e.id,'Petty '+(type==='in'?'In':'Out')+' '+e.category+' '+fmtAED(amount),amount);msg('pc-msg','✅ Submitted — pending management approval before it counts in reports.',true);}
+  else msg('pc-msg','✅ Saved!',true);
+  setTimeout(()=>render(),900);
 }
 async function delPetty(id){const e=pettyCash.find(x=>x.id===id);if(!e)return;if(!confirm('Delete this petty cash entry?'))return;pettyCash=pettyCash.filter(x=>x.id!==id);await dbDeletePetty(id);savePetty();await logAction('PETTY_CASH_DELETED',fmtAED(e.amount)+' — '+e.category);render();}
 function exportCashCSV(){
@@ -4998,7 +5127,7 @@ function renderAccounting(){
     cogs=0;inv.forEach(i=>(i.items||[]).forEach(it=>{const p=pm[it.sku];if(p){const pcs=it.unit==='case'?(it.qty*(p.ppc||1)):it.qty;cogs+=(+p.cost||0)*pcs;}}));
     const grossProfit=revenue-cogs;
     // expenses: petty cash out + (optionally) other
-    const pettyExp=(typeof pettyCash!=='undefined'?pettyCash:[]).filter(e=>e.type==='out'&&inAcct(e.date)).reduce((a,e)=>a+e.amount,0);const expModule=(typeof expensesNet==='function')?expensesNet(acctFrom,acctTo):0;const expenses=pettyExp+expModule;
+    const pettyExp=(typeof pettyCash!=='undefined'?pettyCash:[]).filter(e=>isApprovedRec(e)&&e.type==='out'&&inAcct(e.date)).reduce((a,e)=>a+e.amount,0);const expModule=(typeof expensesNet==='function')?expensesNet(acctFrom,acctTo):0;const expenses=pettyExp+expModule;
     const netProfit=grossProfit-expenses;
     const margin=revenue?(grossProfit/revenue*100):0;
     body=`<div class="al al-b" style="margin-bottom:14px">📊 Simplified Profit & Loss for the period. Revenue and cost of goods come from invoices; expenses come from petty cash. This is a management view — final figures are set by your accountant.</div>
@@ -5024,7 +5153,7 @@ function renderAccounting(){
     const rets=(typeof returns!=='undefined'?returns:[]).filter(r=>!r.cancelled&&inAcct(r.date));
     const revenue=inv.reduce((a,i)=>a+(+i.subtotal||0),0)-rets.reduce((a,r)=>a+(+r.subtotal||0),0);
     const pm=prodMap();let cogs=0;inv.forEach(i=>(i.items||[]).forEach(it=>{const p=pm[it.sku];if(p){const pcs=it.unit==='case'?(it.qty*(p.ppc||1)):it.qty;cogs+=(+p.cost||0)*pcs;}}));
-    const pettyExp=(typeof pettyCash!=='undefined'?pettyCash:[]).filter(e=>e.type==='out'&&inAcct(e.date)).reduce((a,e)=>a+e.amount,0);const expModule=(typeof expensesNet==='function')?expensesNet(acctFrom,acctTo):0;const expenses=pettyExp+expModule;
+    const pettyExp=(typeof pettyCash!=='undefined'?pettyCash:[]).filter(e=>isApprovedRec(e)&&e.type==='out'&&inAcct(e.date)).reduce((a,e)=>a+e.amount,0);const expModule=(typeof expensesNet==='function')?expensesNet(acctFrom,acctTo):0;const expenses=pettyExp+expModule;
     const netProfit=revenue-cogs-expenses;
     const THRESHOLD=375000;
     const taxable=Math.max(0,netProfit-THRESHOLD);
@@ -5128,7 +5257,7 @@ function renderFinStatements(){
   rets.forEach(r=>(r.items||[]).forEach(it=>{const p=products.find(x=>x.sku===it.sku);if(p){const u=(it.unit==='case'||it.unit==='cases')?(p.ppc||1):1;cogs-=(+it.qty||0)*u*(+p.cost||0);}}));
   const grossProfit=revenue-cogs;
   // Expenses (petty cash out)
-  const pettyExp=(typeof pettyCash!=='undefined'?pettyCash:[]).filter(e=>e.type==='out'&&inFin(e.date)).reduce((a,e)=>a+e.amount,0);const expModule=(typeof expensesNet==='function')?expensesNet(finFrom,finTo):0;const expenses=pettyExp+expModule;
+  const pettyExp=(typeof pettyCash!=='undefined'?pettyCash:[]).filter(e=>isApprovedRec(e)&&e.type==='out'&&inFin(e.date)).reduce((a,e)=>a+e.amount,0);const expModule=(typeof expensesNet==='function')?expensesNet(finFrom,finTo):0;const expenses=pettyExp+expModule;
   const netProfit=grossProfit-expenses;
   // Assets
   const stockValue=inventoryValue();
@@ -5217,16 +5346,18 @@ async function loadExpFromDB(){
 function ensureExpRange(){if(!expFrom){const d=new Date();expFrom=new Date(d.getFullYear(),d.getMonth(),1).toISOString().split('T')[0];expTo=new Date(d.getFullYear(),d.getMonth()+1,0).toISOString().split('T')[0];}}
 function inExp(date){return (!expFrom||date>=expFrom)&&(!expTo||date<=expTo);}
 // Recoverable input VAT from expenses in a date range (for VAT 201 Box 9)
+// Approved = counts in reports (pending/rejected excluded). Old records without status = approved.
+function isApprovedRec(r){return !r.status||r.status==='approved';}
 function expensesInputVAT(from,to){
-  return expenses.filter(e=>e.hasVat&&(!from||e.date>=from)&&(!to||e.date<=to)).reduce((a,e)=>a+(+e.vatAmount||0),0);
+  return expenses.filter(e=>isApprovedRec(e)&&e.hasVat&&(!from||e.date>=from)&&(!to||e.date<=to)).reduce((a,e)=>a+(+e.vatAmount||0),0);
 }
 // Total expense NET (excl VAT) in range — for P&L / Income Statement
 function expensesNet(from,to){
-  return expenses.filter(e=>(!from||e.date>=from)&&(!to||e.date<=to)).reduce((a,e)=>a+(+e.net||0),0);
+  return expenses.filter(e=>isApprovedRec(e)&&(!from||e.date>=from)&&(!to||e.date<=to)).reduce((a,e)=>a+(+e.net||0),0);
 }
 // Standard-rated expense base (net of recoverable expenses) for VAT 201 Box 9 amount
 function expensesVatBase(from,to){
-  return expenses.filter(e=>e.hasVat&&(!from||e.date>=from)&&(!to||e.date<=to)).reduce((a,e)=>a+(+e.net||0),0);
+  return expenses.filter(e=>isApprovedRec(e)&&e.hasVat&&(!from||e.date>=from)&&(!to||e.date<=to)).reduce((a,e)=>a+(+e.net||0),0);
 }
 
 function calcExpVat(){
@@ -5314,11 +5445,12 @@ async function saveExpense(){
   const hasVat=document.getElementById('exp-hasvat').checked;
   const vatAmount=hasVat?+(gross*VAT_RATE/(1+VAT_RATE)).toFixed(2):0;
   const net=+(gross-vatAmount).toFixed(2);
-  const e={id:uid(),date,category:document.getElementById('exp-cat').value,desc:document.getElementById('exp-desc').value.trim(),vendor:document.getElementById('exp-vendor').value.trim(),gross:+gross.toFixed(2),hasVat,vatAmount,net,method:document.getElementById('exp-method').value,ref:document.getElementById('exp-ref').value.trim(),by:currentUser?.name||'',ts:Date.now()};
+  const e={id:uid(),date,category:document.getElementById('exp-cat').value,desc:document.getElementById('exp-desc').value.trim(),vendor:document.getElementById('exp-vendor').value.trim(),gross:+gross.toFixed(2),hasVat,vatAmount,net,method:document.getElementById('exp-method').value,ref:document.getElementById('exp-ref').value.trim(),by:currentUser?.name||'',status:needsFinApproval()?'pending':'approved',ts:Date.now()};
   expenses.push(e);await dbInsertExp(e);saveExp();
-  await logAction('EXPENSE_RECORDED',e.category+' — '+fmtAED(e.gross)+(hasVat?' (incl VAT '+fmtAED(vatAmount)+')':'')+(e.vendor?' — '+e.vendor:''));
-  msg('exp-msg','✅ Expense saved!',true);
-  setTimeout(()=>render(),600);
+  await logAction('EXPENSE_RECORDED',e.category+' — '+fmtAED(e.gross)+(hasVat?' (incl VAT '+fmtAED(vatAmount)+')':'')+(e.vendor?' — '+e.vendor:'')+(e.status==='pending'?' [PENDING APPROVAL]':''));
+  if(e.status==='pending'){await createFinApproval('expense',e.id,e.category+' '+fmtAED(e.gross),e.gross);msg('exp-msg','✅ Expense submitted — pending management approval before it counts in reports.',true);}
+  else msg('exp-msg','✅ Expense saved!',true);
+  setTimeout(()=>render(),900);
 }
 async function delExpense(id){const e=expenses.find(x=>x.id===id);if(!e)return;if(!confirm('Delete this expense?'))return;expenses=expenses.filter(x=>x.id!==id);await dbDelExp(id);saveExp();await logAction('EXPENSE_DELETED',e.category+' — '+fmtAED(e.gross));render();}
 function exportExpensesCSV(){
