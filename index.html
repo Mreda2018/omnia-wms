@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8"/>
 <meta name="viewport" content="width=device-width,initial-scale=1.0"/>
-<title>OMNIA — Warehouse Management System</title>
+<title>OMNIA — Business Management System</title>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
 <style>
@@ -251,7 +251,7 @@ input:focus,select:focus,textarea:focus{border-color:var(--g);background:var(--w
 <div id="sb">
   <div class="sb-head">
     <div class="sb-logo-wrap"><div id="sb-logo-slot"></div></div>
-    <div style="margin-top:8px;font-size:9px;color:#4a5568;font-weight:600;letter-spacing:.8px;text-transform:uppercase">Warehouse Management</div>
+    <div style="margin-top:8px;font-size:9px;color:#4a5568;font-weight:600;letter-spacing:.8px;text-transform:uppercase">Business Management System</div>
   </div>
   <div class="sb-nav">
     <div class="ns">Overview</div>
@@ -948,7 +948,7 @@ function expTag(days){if(days===null)return'';if(days<0)return`<span class="tag 
 
 // ── NAV ──────────────────────────────────────────
 const pageInfo={
-  dashboard:['Dashboard','All locations overview'],
+  dashboard:['Dashboard','Inventory, sales & financial overview'],
   in:['Stock In','Record incoming stock with batch & expiry'],
   out:['Stock Out','Record outgoing / dispatched stock'],
   transfer:['Transfer','Move stock between locations'],
@@ -1223,6 +1223,27 @@ function renderDashboard(){
     <div class="kpi" style="border-top-color:#ef4444"><div class="ki">⏰</div><div class="kl">Expiry Alerts</div><div class="kv" style="color:${expItems.filter(e=>e.d<0).length?'var(--red)':expItems.filter(e=>e.d<=30).length?'var(--amber)':'var(--g)'}">${expItems.length}</div><div class="ks">${expItems.filter(e=>e.d<0).length} expired · ${expItems.filter(e=>e.d>=0&&e.d<=30).length} within 30d</div></div>
     <div class="kpi" style="border-top-color:#8b5cf6"><div class="ki">📊</div><div class="kl">Total Movements</div><div class="kv">${movements.length}</div><div class="ks">all time entries</div></div>
   </div>
+
+  ${(()=>{
+    // Financial summary row — only for roles that can see financial modules
+    if(!canAccess('invoices')&&!canAccess('payments')&&!canAccess('expenses')&&!canAccess('cash'))return '';
+    const today=new Date();const mStart=new Date(today.getFullYear(),today.getMonth(),1).toISOString().split('T')[0];const mEnd=new Date(today.getFullYear(),today.getMonth()+1,0).toISOString().split('T')[0];
+    const inM=d=>d>=mStart&&d<=mEnd;
+    const apprOK=r=>!r.status||r.status==='approved';
+    const monthSales=(typeof invoices!=='undefined'?invoices:[]).filter(i=>!i.cancelled&&inM(i.date)).reduce((a,i)=>a+(+i.total||0),0);
+    const monthReceipts=(typeof payments!=='undefined'?payments:[]).filter(p=>!p.cancelled&&apprOK(p)&&inM(p.date)).reduce((a,p)=>a+(+p.amount||0),0);
+    const monthExp=(typeof expenses!=='undefined'?expenses:[]).filter(e=>apprOK(e)&&inM(e.date)).reduce((a,e)=>a+(+e.gross||0),0);
+    const receivables=(typeof customers!=='undefined'?customers:[]).reduce((a,c)=>{try{const b=custBalance(c.name);return a+(b.balance>0?b.balance:0);}catch(e){return a;}},0);
+    const pendingAppr=(typeof approvals!=='undefined'?approvals:[]).filter(a=>a.status==='pending').length;
+    const monthLabel=today.toLocaleDateString('en-GB',{month:'long',year:'numeric'});
+    const cards=[];
+    if(canAccess('invoices'))cards.push(`<div class="kpi" style="border-top-color:#059669"><div class="ki">🧾</div><div class="kl">Sales — ${monthLabel}</div><div class="kv" style="font-size:17px;color:#059669">AED ${monthSales.toLocaleString('en-AE',{maximumFractionDigits:0})}</div><div class="ks">invoiced this month</div></div>`);
+    if(canAccess('payments'))cards.push(`<div class="kpi" style="border-top-color:#0369a1"><div class="ki">💵</div><div class="kl">Collected — ${monthLabel}</div><div class="kv" style="font-size:17px;color:#0369a1">AED ${monthReceipts.toLocaleString('en-AE',{maximumFractionDigits:0})}</div><div class="ks">payments received</div></div>`);
+    if(canAccess('payments')||canAccess('statement'))cards.push(`<div class="kpi" style="border-top-color:#d97706"><div class="ki">⏳</div><div class="kl">Receivables</div><div class="kv" style="font-size:17px;color:#d97706">AED ${receivables.toLocaleString('en-AE',{maximumFractionDigits:0})}</div><div class="ks">outstanding from customers</div></div>`);
+    if(canAccess('expenses'))cards.push(`<div class="kpi" style="border-top-color:#dc2626"><div class="ki">💸</div><div class="kl">Expenses — ${monthLabel}</div><div class="kv" style="font-size:17px;color:#dc2626">AED ${monthExp.toLocaleString('en-AE',{maximumFractionDigits:0})}</div><div class="ks">this month</div></div>`);
+    if(canApprove()&&pendingAppr>0)cards.push(`<div class="kpi" style="border-top-color:#7c3aed;cursor:pointer" onclick="go('approvals')"><div class="ki">✅</div><div class="kl">Pending Approvals</div><div class="kv" style="font-size:17px;color:#7c3aed">${pendingAppr}</div><div class="ks">awaiting your review →</div></div>`);
+    return cards.length?`<div class="kg" style="margin-top:14px">${cards.join('')}</div>`:'';
+  })()}
 
   ${negItems.length?`<div class="al al-r">🔴 <div><b>Negative Stock Alert:</b> ${negItems.map(i=>`${i.l.name} · ${i.p.sku} (${i.cl} pcs)`).join(' | ')}</div></div>`:''}
   ${lowItems.length?`<div class="al al-a">⚠️ <div><b>Low Stock:</b> ${lowItems.slice(0,5).map(i=>`${i.l.name} · ${i.p.sku} (${cpStr(i.cl,getPPC(i.p.sku))})`).join(' | ')}${lowItems.length>5?` + ${lowItems.length-5} more`:''}</div></div>`:''}
@@ -2254,7 +2275,7 @@ function renderApprovals(){
   };
   const statLbl=s=>s==='approved'?'<span class="tag" style="background:#dcfce7;color:#15803d">✓ APPROVED</span>':s==='rejected'?'<span class="tag" style="background:#fee2e2;color:#b91c1c">✖ REJECTED</span>':'<span class="tag" style="background:#fef3c7;color:#b45309">⏳ PENDING</span>';
   document.getElementById('content').innerHTML=`
-  ${canApprove()?'<div class="al al-g" style="margin-bottom:14px;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px"><span>👑 As management, you can approve or reject invoice edit/cancel requests from the sales team.</span><button class="btn bg bsm" onclick="refreshApprovals()">🔄 Refresh</button></div>':'<div class="al al-b" style="margin-bottom:14px">These are your invoice edit/cancel requests and their status. Once approved, go to Tax Invoices and perform the action.</div>'}
+  ${canApprove()?'<div class="al al-g" style="margin-bottom:14px;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px"><span>👑 As management, you review and approve or reject requests from your team — invoice edits & cancellations, plus expenses, payments/receipts and petty cash entries from roles that require approval. Pending financial entries don\'t count in reports until you approve them.</span><button class="btn bg bsm" onclick="refreshApprovals()">🔄 Refresh</button></div>':'<div class="al al-b" style="margin-bottom:14px">These are your requests awaiting management approval — invoice edits/cancellations and any expenses, payments or petty cash you recorded. Financial entries won\'t appear in reports until approved. Approved invoice actions can then be performed in Tax Invoices.</div>'}
   <div class="card" style="margin-bottom:14px"><div class="ch" style="background:#fffbeb;border-bottom-color:#fcd34d;color:#92400e">⏳ Pending Requests (${pending.length})</div>
     ${pending.length?`<div class="tw"><table><thead><tr><th>Type</th><th>Invoice</th><th>Requested By</th><th>Reason</th><th>When</th>${canApprove()?'<th></th>':'<th>Status</th>'}</tr></thead><tbody>
       ${pending.map(a=>`<tr>
