@@ -225,7 +225,7 @@ input:focus,select:focus,textarea:focus{border-color:var(--g);background:var(--w
     <div style="text-align:center;margin-bottom:24px">
       <div style="display:flex;justify-content:center;margin-bottom:12px"><div id="login-logo-slot"></div></div>
       <div style="font-size:12px;color:#0c1a27;margin-top:6px;font-weight:700">Business Management System</div>
-      <div style="font-size:10px;color:#64748b;margin-top:3px">📦 Warehouse · 🧾 Invoicing · 📈 Sales</div>
+      <div style="font-size:10px;color:#64748b;margin-top:3px;line-height:1.7">📦 Inventory · 🧾 Sales · 💵 Payments<br>🧮 Accounting · 🏦 Finance · 📓 Bookkeeping</div>
     </div>
     <div style="margin-bottom:12px">
       <label style="display:block;font-size:10px;font-weight:700;color:#64748b;letter-spacing:.5px;text-transform:uppercase;margin-bottom:4px">Email</label>
@@ -313,7 +313,7 @@ input:focus,select:focus,textarea:focus{border-color:var(--g);background:var(--w
       <div><h1 id="ptitle">Dashboard</h1><div class="topbar-sub" id="psub">Inventory overview</div></div>
     </div>
     <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center" class="no-print">
-      <button class="btn bgh bsm" onclick="exportCSV()">📊 Excel</button>
+      <button class="btn bgh bsm" id="topbar-export" onclick="smartExport()">📊 Excel</button>
       <button class="btn bd bsm" onclick="window.print()">🖨 PDF</button>
       <button class="btn br bsm" id="mob-logout" onclick="doLogout()" style="display:none">🚪</button>
     </div>
@@ -992,6 +992,13 @@ function go(page){
   const [title,sub]=pageInfo[page]||[page,''];
   document.getElementById('ptitle').textContent=title;
   document.getElementById('psub').textContent=sub;
+  // Top-bar Excel button: only show on stock pages (other pages have their own export buttons inside)
+  const expBtn=document.getElementById('topbar-export');
+  if(expBtn){
+    const stockPages=['rep-all','log','in','out','transfer','adjust'];
+    const isLocRep=page&&page.startsWith('rep-');
+    expBtn.style.display=(stockPages.includes(page)||isLocRep)?'':'none';
+  }
   closeSb();
   render();
 }
@@ -1068,7 +1075,32 @@ async function runCleanup(){
   render();
 }
 
-// ── EXPORT (Excel .xlsx — formatted, professional) ───────────────────────────
+// Context-aware export — routes the top-bar Excel button to the current page's data
+function smartExport(){
+  const p=curPage;
+  // Pages with their own dedicated export function
+  const routes={
+    'log':exportCSV,'rep-all':exportCSV,'in':exportCSV,'out':exportCSV,'transfer':exportCSV,'adjust':exportCSV,
+    'expenses':typeof exportExpensesCSV==='function'?exportExpensesCSV:null,
+    'assets':typeof exportAssetsCSV==='function'?exportAssetsCSV:null,
+    'cash':typeof exportCashCSV==='function'?exportCashCSV:null,
+    'payments':typeof exportPaymentsCSV==='function'?exportPaymentsCSV:null,
+    'sales':typeof exportSalesCSV==='function'?exportSalesCSV:null,
+    'bookkeeping':typeof exportJournalCSV==='function'?exportJournalCSV:null,
+    'audit':typeof exportAuditCSV==='function'?exportAuditCSV:null,
+    'outrep':typeof exportOutRepCSV==='function'?exportOutRepCSV:null,
+    'inrep':typeof exportInRepCSV==='function'?exportInRepCSV:null,
+  };
+  if(p&&p.startsWith('rep-')){exportCSV();return;}
+  if(routes[p]){routes[p]();return;}
+  // Financial statement pages are print-oriented (formatted layout) → use Print
+  if(['finstate','accounting','statement','dashboard'].includes(p)){
+    alert('This page is best exported using the 🖨 PDF / Print button, which keeps its formatted layout. (The Excel button exports raw data tables like stock, expenses, payments and the journal.)');
+    return;
+  }
+  // Default fallback: stock report
+  exportCSV();
+}
 // Strip emojis & symbol clutter from text (for clean Excel cells)
 function stripEmoji(s){return String(s||'').replace(/[\u{1F000}-\u{1FFFF}\u{2600}-\u{27BF}\u{2190}-\u{21FF}\u{2B00}-\u{2BFF}\u{FE0F}\u{200D}]/gu,'').replace(/\s+/g,' ').trim();}
 function exportCSV(){
