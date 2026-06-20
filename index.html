@@ -2,8 +2,18 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8"/>
-<meta name="viewport" content="width=device-width,initial-scale=1.0"/>
+<meta name="viewport" content="width=device-width,initial-scale=1.0,viewport-fit=cover"/>
 <title>OMNIA — Business Management System</title>
+<!-- ── PWA (installable app on desktop & mobile) ── -->
+<meta name="theme-color" content="#0c1a27"/>
+<meta name="mobile-web-app-capable" content="yes"/>
+<meta name="apple-mobile-web-app-capable" content="yes"/>
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent"/>
+<meta name="apple-mobile-web-app-title" content="OMNIA"/>
+<meta name="application-name" content="OMNIA"/>
+<link rel="manifest" href="manifest.json"/>
+<link rel="apple-touch-icon" href="icon-180.png"/>
+<link rel="icon" type="image/png" href="icon-180.png"/>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
 <style>
@@ -315,6 +325,7 @@ input:focus,select:focus,textarea:focus{border-color:var(--g);background:var(--w
     <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center" class="no-print">
       <button class="btn bgh bsm" id="topbar-export" onclick="smartExport()">📊 Excel</button>
       <button class="btn bd bsm" onclick="window.print()">🖨 PDF</button>
+      <button class="btn bsm" id="install-app-btn" onclick="installPWA()" style="display:none;background:#0c1a27;color:#fff">⬇ Install App</button>
       <button class="btn br bsm" id="mob-logout" onclick="doLogout()" style="display:none">🚪</button>
     </div>
   </div>
@@ -5347,6 +5358,8 @@ function markBackupDone(){localStorage.setItem('wms_last_backup',Date.now());}
 function daysSinceBackup(){const t=lastBackupTime();if(!t)return 999;return Math.floor((Date.now()-t)/86400000);}
 function checkBackupReminder(){
   if(typeof DEMO_MODE!=='undefined'&&DEMO_MODE)return;
+  // Backup is an admin-only feature → only remind admins
+  if(!currentUser||normRole(currentUser.role)!=='admin'){const bar=document.getElementById('backup-reminder');if(bar)bar.style.display='none';return;}
   const days=daysSinceBackup();
   // Remind if never backed up, or >7 days
   if(days>=7){
@@ -5900,6 +5913,35 @@ document.addEventListener('DOMContentLoaded',()=>{injectLogos();startClock();sta
   document.getElementById('login-screen').style.display='flex';
   setConn('','Ready');
 })();
+
+// ── PWA: register service worker (enables install + faster loads) ──
+if('serviceWorker' in navigator){
+  window.addEventListener('load',()=>{
+    navigator.serviceWorker.register('sw.js').catch(err=>console.log('SW registration skipped:',err.message));
+  });
+}
+// ── PWA: install button handling ──
+let deferredInstallPrompt=null;
+window.addEventListener('beforeinstallprompt',(e)=>{
+  e.preventDefault();
+  deferredInstallPrompt=e;
+  const btn=document.getElementById('install-app-btn');
+  if(btn)btn.style.display='';
+});
+async function installPWA(){
+  if(!deferredInstallPrompt){
+    alert('To install:\n\n• On iPhone/iPad (Safari): tap the Share button, then "Add to Home Screen".\n• On Android (Chrome): tap the ⋮ menu, then "Install app" / "Add to Home Screen".\n• On Desktop (Chrome/Edge): click the install icon in the address bar.');
+    return;
+  }
+  deferredInstallPrompt.prompt();
+  const{outcome}=await deferredInstallPrompt.userChoice;
+  deferredInstallPrompt=null;
+  const btn=document.getElementById('install-app-btn');
+  if(btn&&outcome==='accepted')btn.style.display='none';
+}
+window.addEventListener('appinstalled',()=>{
+  const btn=document.getElementById('install-app-btn');if(btn)btn.style.display='none';
+});
 </script>
 </body>
 </html>
