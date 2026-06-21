@@ -235,7 +235,7 @@ input:focus,select:focus,textarea:focus{border-color:var(--g);background:var(--w
     <div style="text-align:center;margin-bottom:24px">
       <div style="display:flex;justify-content:center;margin-bottom:12px"><div id="login-logo-slot"></div></div>
       <div style="font-size:12px;color:#0c1a27;margin-top:6px;font-weight:700">Business Management System</div>
-      <div style="font-size:10px;color:#64748b;margin-top:3px;line-height:1.7">📦 Inventory · 🧾 Sales · 💵 Payments<br>🧮 Accounting · 🏦 Finance · 📓 Bookkeeping</div>
+      <div style="font-size:10px;color:#64748b;margin-top:5px;letter-spacing:.5px;text-transform:uppercase;font-weight:600">Inventory · Sales · Finance · Accounting</div>
     </div>
     <div style="margin-bottom:12px">
       <label style="display:block;font-size:10px;font-weight:700;color:#64748b;letter-spacing:.5px;text-transform:uppercase;margin-bottom:4px">Email</label>
@@ -302,6 +302,7 @@ input:focus,select:focus,textarea:focus{border-color:var(--g);background:var(--w
     <div class="ni" id="nav-opening" onclick="go('opening')"><span class="ic">🏁</span>Opening Balances</div>
     <div class="ni" id="nav-locations" onclick="go('locations')"><span class="ic">📍</span>Locations</div>
     <div class="ni" id="nav-users" onclick="go('users')"><span class="ic">👤</span>Users</div>
+    <div class="ni" id="nav-datausage" onclick="go('datausage')"><span class="ic">💾</span>Data Usage</div>
     <div class="ni" id="nav-audit" onclick="go('audit')"><span class="ic">🔒</span>Audit Log</div>
   </div>
   <div class="sb-foot">OMNIA FOOD TRADING LLC<br>042 585 444 · omniaft.com<div style="margin-top:6px;padding-top:6px;border-top:1px solid rgba(255,255,255,.05);color:#3d4a5c;font-size:8.5px;letter-spacing:.3px">Designed &amp; Developed by <span style="color:#4DB78C;font-weight:700">Mohamed Reda</span></div></div>
@@ -987,6 +988,7 @@ const pageInfo={
   approvals:['Approvals','Invoice edit/cancel approval requests'],
   audit:['Audit Log','Immutable activity trail'],
   users:['User Management','Add users & control permissions'],
+  datausage:['Data Usage','Database size, record counts & limits'],
   products:['Products / SKUs','Manage product master list'],
   opening:['Opening Balances','Set initial stock per location'],
   locations:['Locations','Manage warehouse locations'],
@@ -1212,7 +1214,7 @@ function render(){
   try{
     renderLocNav();
     if(typeof updateApprBadge==='function')updateApprBadge();
-    const map={dashboard:renderDashboard,in:renderIn,out:renderOut,transfer:renderTransfer,adjust:renderAdjust,log:renderLog,expiry:renderExpiry,products:renderProducts,opening:renderOpening,locations:renderLocations,invoices:renderInvoices,customers:renderCustomers,sales:renderSales,returns:renderReturns,delivery:renderDelivery,payments:renderPayments,statement:renderStatement,cash:renderCash,suppliers:renderSuppliers,expenses:renderExpenses,assets:renderAssets,accounting:renderAccounting,bookkeeping:renderBookkeeping,finstate:renderFinStatements,einvoice:renderEInvoiceQueue,approvals:renderApprovals,audit:renderAudit,users:renderUsers,outrep:renderOutReport,inrep:renderInReport};
+    const map={dashboard:renderDashboard,in:renderIn,out:renderOut,transfer:renderTransfer,adjust:renderAdjust,log:renderLog,expiry:renderExpiry,products:renderProducts,opening:renderOpening,locations:renderLocations,invoices:renderInvoices,customers:renderCustomers,sales:renderSales,returns:renderReturns,delivery:renderDelivery,payments:renderPayments,statement:renderStatement,cash:renderCash,suppliers:renderSuppliers,expenses:renderExpenses,assets:renderAssets,accounting:renderAccounting,bookkeeping:renderBookkeeping,finstate:renderFinStatements,einvoice:renderEInvoiceQueue,approvals:renderApprovals,audit:renderAudit,users:renderUsers,datausage:renderDataUsage,outrep:renderOutReport,inrep:renderInReport};
     if(curPage.startsWith('rep-'))renderReport(curPage==='rep-all'?null:curPage.replace('rep-',''));
     else(map[curPage]||renderDashboard)();
     updateExpBadge();
@@ -3378,6 +3380,99 @@ function permsSummary(u){
   const p=u.perms||{};
   return(p.pages||[]).length+' pages · '+(p.invEdit?'inv-edit ':'')+(p.salesEdit?'sales-edit':'')||'custom';
 }
+// ══════════ DATA USAGE / DATABASE LIMITS (admin) ══════════
+// Estimates Supabase usage so you can upgrade before hitting free-tier limits.
+const SB_FREE_DB_MB=500; // Supabase Free plan database size (verify in your dashboard)
+function estimateRowBytes(obj){
+  // Rough byte estimate of a record as stored (JSON-ish). Good enough for trend monitoring.
+  try{return JSON.stringify(obj).length;}catch(e){return 200;}
+}
+function dataUsageStats(){
+  const tables=[
+    {key:'movements',label:'Stock Movements',icon:'📦',arr:typeof movements!=='undefined'?movements:[]},
+    {key:'invoices',label:'Tax Invoices',icon:'🧾',arr:typeof invoices!=='undefined'?invoices:[]},
+    {key:'payments',label:'Payments / Receipts',icon:'💵',arr:typeof payments!=='undefined'?payments:[]},
+    {key:'expenses',label:'Expenses',icon:'💸',arr:typeof expenses!=='undefined'?expenses:[]},
+    {key:'pettyCash',label:'Petty Cash',icon:'💰',arr:typeof pettyCash!=='undefined'?pettyCash:[]},
+    {key:'assets',label:'Fixed Assets',icon:'🏛',arr:typeof assets!=='undefined'?assets:[]},
+    {key:'returns',label:'Sales Returns',icon:'↩',arr:typeof returns!=='undefined'?returns:[]},
+    {key:'customers',label:'Customers',icon:'👥',arr:typeof customers!=='undefined'?customers:[]},
+    {key:'products',label:'Products / SKUs',icon:'🗂',arr:typeof products!=='undefined'?products:[]},
+    {key:'suppliers',label:'Suppliers',icon:'🌍',arr:typeof suppliers!=='undefined'?suppliers:[]},
+    {key:'supPurchases',label:'Supplier Purchases',icon:'📥',arr:typeof supPurchases!=='undefined'?supPurchases:[]},
+    {key:'supPayments',label:'Supplier Payments',icon:'📤',arr:typeof supPayments!=='undefined'?supPayments:[]},
+    {key:'openingBal',label:'Opening Balances',icon:'🏁',arr:typeof openingBal!=='undefined'?openingBal:[]},
+    {key:'approvals',label:'Approvals',icon:'✅',arr:typeof approvals!=='undefined'?approvals:[]},
+    {key:'auditLog',label:'Audit Log',icon:'🔒',arr:typeof auditLog!=='undefined'?auditLog:[]},
+  ];
+  let totalRows=0,totalBytes=0;
+  tables.forEach(t=>{
+    t.rows=t.arr.length;
+    t.bytes=t.arr.reduce((a,r)=>a+estimateRowBytes(r),0);
+    // DB overhead: indexes, row headers etc. ~2.5x raw JSON in Postgres
+    t.dbBytes=Math.round(t.bytes*2.5);
+    totalRows+=t.rows;totalBytes+=t.dbBytes;
+  });
+  tables.sort((a,b)=>b.dbBytes-a.dbBytes);
+  return{tables,totalRows,totalBytes};
+}
+function fmtBytes(b){
+  if(b<1024)return b+' B';
+  if(b<1048576)return (b/1024).toFixed(1)+' KB';
+  return (b/1048576).toFixed(2)+' MB';
+}
+function renderDataUsage(){
+  const{tables,totalRows,totalBytes}=dataUsageStats();
+  const usedMB=totalBytes/1048576;
+  const pct=Math.min(100,(usedMB/SB_FREE_DB_MB)*100);
+  let band,bandColor,bandBg,advice;
+  if(pct<50){band='Healthy';bandColor='#065f46';bandBg='#f0fdf4';advice='Plenty of room. No action needed.';}
+  else if(pct<75){band='Moderate';bandColor='#92400e';bandBg='#fffbeb';advice='Usage is growing. Keep an eye on it monthly.';}
+  else if(pct<90){band='High';bandColor='#9a3412';bandBg='#fff7ed';advice='Consider upgrading to the Pro plan soon to avoid interruptions.';}
+  else{band='Critical';bandColor='#991b1b';bandBg='#fef2f2';advice='⚠ Upgrade to Pro plan now — you are close to the free-tier limit.';}
+  const barColor=pct<50?'#4DB78C':pct<75?'#f59e0b':pct<90?'#f97316':'#ef4444';
+  document.getElementById('content').innerHTML=`
+  <div class="al al-b no-print" style="margin-bottom:14px">💾 <b>Data Usage</b> — an in-app estimate of how much of your Supabase free database you're using, so you can upgrade <b>before</b> hitting a limit. This is an approximation; the exact figure is in your Supabase dashboard → Settings → Usage.</div>
+
+  <div class="card" style="margin-bottom:14px"><div class="ch">Database Size (estimate)</div><div class="cb">
+    <div style="display:flex;justify-content:space-between;align-items:flex-end;margin-bottom:8px;flex-wrap:wrap;gap:8px">
+      <div><span style="font-size:28px;font-weight:800;color:${barColor}">${usedMB<0.01?'<0.01':usedMB.toFixed(2)} MB</span><span style="font-size:14px;color:var(--muted)"> / ${SB_FREE_DB_MB} MB</span></div>
+      <span class="tag" style="background:${bandBg};color:${bandColor};font-size:13px;padding:5px 12px">${band} — ${pct<0.1?'<0.1':pct.toFixed(1)}%</span>
+    </div>
+    <div style="background:#eef2f6;border-radius:10px;height:18px;overflow:hidden">
+      <div style="width:${Math.max(pct,0.5)}%;height:100%;background:${barColor};border-radius:10px;transition:width .4s"></div>
+    </div>
+    <div style="margin-top:10px;font-size:12px;color:${bandColor};font-weight:600;background:${bandBg};border-radius:8px;padding:9px 12px">${advice}</div>
+    <div style="margin-top:8px;font-size:11px;color:var(--muted)">Total records: <b>${totalRows.toLocaleString()}</b> across ${tables.length} tables · Estimated DB footprint includes Postgres index/overhead (~2.5× raw data).</div>
+  </div></div>
+
+  <div class="card" style="margin-bottom:14px"><div class="ch">Records by Table</div><div class="cb"><div class="tw"><table>
+    <thead><tr><th>Table</th><th style="text-align:right">Records</th><th style="text-align:right">Est. Size</th><th>Share</th></tr></thead>
+    <tbody>${tables.map(t=>{const share=totalBytes?(t.dbBytes/totalBytes*100):0;return `<tr>
+      <td style="font-weight:600">${t.icon} ${t.label}</td>
+      <td style="text-align:right">${t.rows.toLocaleString()}</td>
+      <td style="text-align:right;color:var(--muted)">${fmtBytes(t.dbBytes)}</td>
+      <td style="min-width:90px"><div style="display:flex;align-items:center;gap:6px"><div style="flex:1;background:#eef2f6;border-radius:5px;height:7px;overflow:hidden"><div style="width:${share}%;height:100%;background:#4DB78C"></div></div><span style="font-size:10px;color:var(--muted);width:32px;text-align:right">${share.toFixed(0)}%</span></div></td>
+    </tr>`;}).join('')}</tbody>
+  </table></div></div></div>
+
+  <div class="card" style="margin-bottom:14px"><div class="ch" style="background:#fffbeb;border-bottom-color:#fcd34d;color:#92400e">⚠ Free Plan — Important Limits</div><div class="cb">
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:10px">
+      <div style="background:#f8fafc;border:1px solid var(--border);border-radius:9px;padding:12px"><div style="font-size:11px;color:var(--muted);font-weight:700;text-transform:uppercase;letter-spacing:.4px">Database Size</div><div style="font-size:20px;font-weight:800;color:var(--text);margin-top:3px">${SB_FREE_DB_MB} MB</div><div style="font-size:11px;color:var(--muted);margin-top:2px">Your text data is light — hardest limit to hit.</div></div>
+      <div style="background:#fef2f6;border:1px solid #fecdd3;border-radius:9px;padding:12px"><div style="font-size:11px;color:#9f1239;font-weight:700;text-transform:uppercase;letter-spacing:.4px">⏸ Auto-Pause</div><div style="font-size:20px;font-weight:800;color:#9f1239;margin-top:3px">7 days idle</div><div style="font-size:11px;color:#9f1239;margin-top:2px">Biggest risk: DB pauses if unused 7 days. No data lost — just resume from dashboard.</div></div>
+      <div style="background:#f8fafc;border:1px solid var(--border);border-radius:9px;padding:12px"><div style="font-size:11px;color:var(--muted);font-weight:700;text-transform:uppercase;letter-spacing:.4px">Monthly Active Users</div><div style="font-size:20px;font-weight:800;color:var(--text);margin-top:3px">50,000</div><div style="font-size:11px;color:var(--muted);margin-top:2px">Your team is tiny — never a concern.</div></div>
+    </div>
+    <div style="margin-top:12px;font-size:12px;color:var(--muted);line-height:1.6">
+      <b>To avoid the 7-day pause:</b> just open & log into the system at least once a week (even a quick login counts as activity). During long holidays, ask someone to log in once, or upgrade to Pro.<br>
+      <b>When to upgrade to Pro (~$25/month):</b> when this bar passes <b>75–80%</b>, or if you need the database to never pause. Pro gives 8&nbsp;GB database + no auto-pause + daily backups.
+    </div>
+    <div style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap">
+      <button class="btn bg bsm" onclick="window.open('https://supabase.com/dashboard/project/_/settings/billing/usage','_blank')">📊 Open Supabase Usage</button>
+      <button class="btn bb bsm" onclick="window.open('https://supabase.com/pricing','_blank')">⬆ View Pro Plan</button>
+    </div>
+  </div></div>`;
+}
+
 function renderUsers(){
   document.getElementById('content').innerHTML=`
   <div class="al al-b" style="margin-bottom:14px">👑 <b>User Management</b> — add team members with specific permissions. Usernames log in as <b>name@omniaft.com</b>.</div>
