@@ -1628,8 +1628,8 @@ function renderTransfer(){
       <div class="fnote" id="ft-expiry-note">The transfer keeps the same expiry date. Choose "Auto (FEFO)" to let the system pick the nearest-expiry stock first.</div>
     </div>
     <div class="frow f3">
-      <div class="fg"><label>Cases *</label><input type="number" id="ft-cases" min="0" value="0" oninput="calcTP('ft')"/></div>
-      <div class="fg"><label>Pieces</label><input type="number" id="ft-pcs" min="0" value="0" oninput="calcTP('ft')"/></div>
+      <div class="fg"><label>Cases *</label><input type="number" id="ft-cases" min="0" value="0" oninput="calcTfQty()"/></div>
+      <div class="fg"><label>Pieces</label><input type="number" id="ft-pcs" min="0" value="0" oninput="calcTfQty()"/></div>
       <div class="fg"><label>Batch No.</label><input id="ft-batch" placeholder="Auto from selection" readonly style="background:#f8fafc"/></div>
     </div>
     <div id="ft-tp" style="display:none;padding:8px 12px;background:#f8fafc;border-radius:8px;font-size:12px;font-weight:700;margin-bottom:10px"></div>
@@ -1804,8 +1804,39 @@ function onTfExpiryPick(){
   const batchInput=document.getElementById('ft-batch');
   if(!sel||!batchInput)return;
   const opt=sel.options[sel.selectedIndex];
-  if(!opt||sel.value==='__FEFO__'||sel.value===''){batchInput.value='';return;}
-  batchInput.value=opt.getAttribute('data-batch')||'';
+  if(!opt||sel.value==='__FEFO__'||sel.value===''){batchInput.value='';}
+  else batchInput.value=opt.getAttribute('data-batch')||'';
+  calcTfQty();
+}
+// Live quantity check for transfer — warns immediately if exceeding the selected batch
+function calcTfQty(){
+  const sku=document.getElementById('ft-sku')?.value;
+  const p=products.find(x=>x.sku===sku);
+  const cases=parseInt(document.getElementById('ft-cases')?.value)||0;
+  const pcs=parseInt(document.getElementById('ft-pcs')?.value)||0;
+  const tpEl=document.getElementById('ft-tp');
+  const sel=document.getElementById('ft-expiry-sel');
+  if(!p||!tpEl)return;
+  const ppc=p.ppc;const tot=cases*ppc+pcs;
+  if(tot<=0){tpEl.style.display='none';return;}
+  tpEl.style.display='block';
+  // determine available qty for the chosen batch (or whole product for FEFO)
+  let avail=null,ctx='';
+  if(sel&&sel.value&&sel.value!=='__FEFO__'){
+    const opt=sel.options[sel.selectedIndex];
+    avail=parseInt(opt?.getAttribute('data-qty'))||0;
+    ctx='in this batch';
+  }else if(sel&&sel.value==='__FEFO__'){
+    const fromLoc=document.getElementById('ft-from')?.value;
+    if(fromLoc){avail=getBatchStock(fromLoc,sku).reduce((a,b)=>a+b.qty,0);ctx='in total (all batches)';}
+  }
+  if(avail!==null&&tot>avail){
+    tpEl.style.background='#fef2f2';tpEl.style.color='#991b1b';
+    tpEl.innerHTML=`⛔ Transferring ${tot.toLocaleString()} pcs but only <b>${cpStr(avail,ppc)}</b> available ${ctx}. Reduce the quantity.`;
+  }else{
+    tpEl.style.background='#f8fafc';tpEl.style.color='';
+    tpEl.innerHTML=`Total: ${tot.toLocaleString()} pieces (${cases} × ${ppc} + ${pcs})${avail!==null?` · ${cpStr(avail,ppc)} available ${ctx}`:''}`;
+  }
 }
 async function saveTF(){
   const date=document.getElementById('ft-date').value;
@@ -1833,8 +1864,16 @@ async function saveTF(){
     const opt=expSel.options[expSel.selectedIndex];
     const pickExpiry=opt.getAttribute('data-expiry')||'';
     const pickBatch=opt.getAttribute('data-batch')||'';
-    const avail=parseInt(opt.getAttribute('data-qty'))||0;
-    if(totalPcs>avail){msg('ft-msg',`⚠ Only ${cpStr(avail,ppc)} available in this batch. Reduce quantity or pick Auto (FEFO).`,false);return;}
+    // Re-read live availability from stock (not just the DOM attribute) for safety
+    const liveBatches=getBatchStock(fromLoc,sku);
+    const liveBatch=liveBatches.find(b=>(b.expiry||'')===pickExpiry&&(b.batch||'')===pickBatch)
+                  ||liveBatches.find(b=>(b.expiry||'')===pickExpiry);
+    const domQty=parseInt(opt.getAttribute('data-qty'))||0;
+    const avail=liveBatch?liveBatch.qty:domQty;
+    if(totalPcs>avail){
+      msg('ft-msg',`⛔ Cannot transfer ${cpStr(totalPcs,ppc)} — only ${cpStr(avail,ppc)} available in this batch (expiry ${pickExpiry?fD(pickExpiry):'—'}). Reduce the quantity or choose Auto (FEFO).`,false);
+      return;
+    }
     await insertMov({id:uid(),date,sku,type:'TF',fromLoc,toLoc,locId:fromLoc,cases:Math.floor(totalPcs/ppc),pcs:totalPcs%ppc,batch:pickBatch,expiry:pickExpiry,ref,notes,createdBy:currentUser?.name||'',ts:Date.now()});
   }
   logAction('TRANSFER',sku+' — '+cpStr(totalPcs,ppc)+' from '+fromLoc+' to '+toLoc);
