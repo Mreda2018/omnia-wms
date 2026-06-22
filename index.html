@@ -1436,9 +1436,36 @@ async function saveStockInMulti(){
 
 // ── STOCK OUT ────────────────────────────────────
 let outLines=[{sku:'',cases:0,pcs:0,expiry:''}];
+let outRefs=['']; // multiple invoice/PO numbers per stock-out entry
 let outSelLoc='';
-function snapOut(){const g=id=>document.getElementById(id)?.value;return{date:g('fo-date'),party:g('fo-party'),ref:g('fo-ref'),driver:g('fo-driver'),notes:g('fo-notes')};}
-function restOut(v){if(!v)return;const s=(id,val)=>{const el=document.getElementById(id);if(el&&val!==undefined&&val!==null&&val!=='')el.value=val;};s('fo-date',v.date);s('fo-party',v.party);s('fo-ref',v.ref);s('fo-driver',v.driver);s('fo-notes',v.notes);}
+function snapOut(){const g=id=>document.getElementById(id)?.value;
+  // capture current ref inputs into outRefs
+  const refEls=document.querySelectorAll('.fo-ref-input');
+  if(refEls.length)outRefs=Array.from(refEls).map(e=>e.value);
+  return{date:g('fo-date'),party:g('fo-party'),driver:g('fo-driver'),notes:g('fo-notes')};}
+function restOut(v){if(!v)return;const s=(id,val)=>{const el=document.getElementById(id);if(el&&val!==undefined&&val!==null&&val!=='')el.value=val;};s('fo-date',v.date);s('fo-party',v.party);s('fo-driver',v.driver);s('fo-notes',v.notes);}
+function addOutRef(){const refEls=document.querySelectorAll('.fo-ref-input');if(refEls.length)outRefs=Array.from(refEls).map(e=>e.value);outRefs.push('');reOut();}
+function removeOutRef(i){const refEls=document.querySelectorAll('.fo-ref-input');if(refEls.length)outRefs=Array.from(refEls).map(e=>e.value);outRefs.splice(i,1);if(!outRefs.length)outRefs=[''];reOut();}
+// Invoices created (by Sales) on a given date — for Naif to pick from in Stock Out
+function invoicesForDate(date){
+  if(!date)return[];
+  return (typeof invoices!=='undefined'?invoices:[]).filter(i=>!i.cancelled&&i.date===date).sort((a,b)=>(b.ts||0)-(a.ts||0));
+}
+// Naif picks an invoice from the dropdown → add its number to the ref list (+ auto-fill customer)
+function pickInvoiceForOut(invNo){
+  if(!invNo)return;
+  const refEls=document.querySelectorAll('.fo-ref-input');
+  if(refEls.length)outRefs=Array.from(refEls).map(e=>e.value);
+  // avoid duplicates; fill into first empty slot or append
+  if(outRefs.includes(invNo)){msg('fo-msg','⚠ '+invNo+' already added',false);return;}
+  const emptyIdx=outRefs.findIndex(r=>!r.trim());
+  if(emptyIdx>=0)outRefs[emptyIdx]=invNo;else outRefs.push(invNo);
+  // auto-fill customer name if empty
+  const inv=invoices.find(i=>i.invNo===invNo);
+  const partyEl=document.getElementById('fo-party');
+  if(inv&&partyEl&&!partyEl.value.trim()){partyEl.value=inv.customerName||'';}
+  const snap=snapOut();reOut();restOut(snap);
+}
 function reOut(){const v=snapOut();renderOut();restOut(v);}
 function renderOut(){
   const recent=movements.filter(m=>m.type==='OUT').slice(-15).reverse();
@@ -1451,17 +1478,29 @@ function renderOut(){
     <div class="ch" style="background:#fff1f2;border-bottom-color:#fecaca;color:#991b1b;font-size:14px">📤 Stock Out — Multi-Item Invoice <span style="font-size:10px;font-weight:600;color:#b45309">⚡ FEFO: earliest expiry deducted first</span></div>
     <div class="cb">
       <div class="frow f2" style="margin-bottom:14px">
-        <div class="fg"><label>Date *</label><input type="date" id="fo-date" value="${TODAY}"/></div>
+        <div class="fg"><label>Date *</label><input type="date" id="fo-date" value="${TODAY}" onchange="reOut()"/></div>
         <div class="fg"><label>Location (From) *</label><select id="fo-loc" onchange="outSelLoc=this.value;reOut()"><option value="">Select...</option>${locs.map(l=>`<option value="${l.id}" ${outSelLoc===l.id?'selected':''}>${l.icon} ${esc(l.name)}</option>`).join('')}</select></div>
       </div>
       <div class="frow f2" style="margin-bottom:14px">
-        <div class="fg"><label>👤 Customer Name / Company *</label><input id="fo-party" placeholder="Customer or company name"/></div>
-        <div class="fg"><label>🧾 Invoice / DO Number *</label><input id="fo-ref" placeholder="INV-2025-001 / DO-001"/></div>
-      </div>
-      <div class="frow f2" style="margin-bottom:14px">
+        <div class="fg"><label>👤 Customer Name / Company <span style="color:var(--muted);font-weight:400">(optional)</span></label><input id="fo-party" placeholder="Customer or company name"/></div>
         <div class="fg"><label>🚛 Driver / Received By *</label><input id="fo-driver" placeholder="Driver name or person who received the stock"/></div>
-        <div class="fg"><label>Notes</label><input id="fo-notes" placeholder="Optional notes for this invoice"/></div>
       </div>
+      <div class="fg" style="margin-bottom:14px"><label>🧾 Invoice / PO Number(s) <span style="color:var(--muted);font-weight:400">(optional — pick from invoices or type manually)</span></label>
+        ${(()=>{const selDate=document.getElementById('fo-date')?.value||TODAY;const dayInvs=invoicesForDate(selDate);return dayInvs.length?`<div style="display:flex;gap:6px;margin-bottom:8px;align-items:center;flex-wrap:wrap">
+          <select id="fo-inv-picker" onchange="pickInvoiceForOut(this.value);this.value=''" style="flex:1;min-width:200px;padding:8px;border:1.5px solid #4DB78C;border-radius:7px;font-size:12px;background:#f0fdf9">
+            <option value="">📋 Pick from ${dayInvs.length} invoice${dayInvs.length>1?'s':''} dated ${fD(selDate)}...</option>
+            ${dayInvs.map(i=>`<option value="${esc(i.invNo)}">${esc(i.invNo)} — ${esc(i.customerName||'No customer')} — ${fmtAED(i.total)}</option>`).join('')}
+          </select>
+        </div>`:`<div style="font-size:11px;color:var(--muted);margin-bottom:8px;background:#f8fafc;border-radius:7px;padding:7px 10px">ℹ️ No invoices dated ${fD(selDate)} yet. Type invoice/PO numbers manually below, or change the date above.</div>`;})()}
+        <div id="fo-refs-wrap">
+          ${outRefs.map((r,i)=>`<div style="display:flex;gap:6px;margin-bottom:6px;align-items:center">
+            <input class="fo-ref-input" value="${esc(r)}" placeholder="INV-2025-001 / PO-001 (or pick above)" style="flex:1"/>
+            ${outRefs.length>1?`<button class="btn br bsm" onclick="removeOutRef(${i})" style="padding:6px 10px">×</button>`:''}
+          </div>`).join('')}
+        </div>
+        <button class="btn bgh bsm" onclick="addOutRef()" style="margin-top:2px">+ Add another invoice/PO manually</button>
+      </div>
+      <div class="fg" style="margin-bottom:14px"><label>Notes</label><input id="fo-notes" placeholder="Optional notes for this stock out"/></div>
       <div style="border-top:2px solid var(--border);margin:14px 0 12px;padding-top:14px">
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
           <div style="font-weight:800;color:var(--dark);font-size:13px">📦 Line Items (${outLines.length})</div>
@@ -1531,13 +1570,14 @@ async function saveMultiOut(){
   const date=document.getElementById('fo-date').value;
   const locId=document.getElementById('fo-loc').value;
   const party=document.getElementById('fo-party').value.trim();
-  const ref=document.getElementById('fo-ref').value.trim();
+  // collect multiple invoice/PO numbers
+  const refEls=document.querySelectorAll('.fo-ref-input');
+  const refs=Array.from(refEls).map(e=>e.value.trim()).filter(Boolean);
+  const ref=refs.join(', ');
   const driver=document.getElementById('fo-driver').value.trim();
   const notes=document.getElementById('fo-notes').value.trim();
   const validLines=outLines.filter(l=>l.sku&&(l.cases>0||l.pcs>0));
   if(!date||!locId){msg('fo-msg','⚠ Fill Date and Location',false);return;}
-  if(!party){msg('fo-msg','⚠ Enter Customer Name',false);return;}
-  if(!ref){msg('fo-msg','⚠ Enter Invoice / DO Number',false);return;}
   if(!driver){msg('fo-msg','⚠ Enter Driver / Received By name',false);return;}
   if(!validLines.length){msg('fo-msg','⚠ Add at least one product with quantity',false);return;}
   const createdBy=currentUser?.name||'Unknown';
@@ -1557,9 +1597,11 @@ async function saveMultiOut(){
       });
     }
   }
-  logAction('STOCK_OUT','Invoice '+ref+' — '+validLines.length+' items ('+batchCount+' batch deductions, FEFO) to '+party+' (Driver: '+driver+')');
-  msg('fo-msg',`✅ Saved! ${validLines.length} items · ${batchCount} batch deduction${batchCount>1?'s':''} on invoice ${ref}`,true);
+  const refLabel=refs.length?'invoice '+ref:'(no invoice)';
+  logAction('STOCK_OUT',refLabel+' — '+validLines.length+' items ('+batchCount+' batch deductions, FEFO)'+(party?' to '+party:'')+' (Driver: '+driver+')');
+  msg('fo-msg',`✅ Saved! ${validLines.length} items · ${batchCount} batch deduction${batchCount>1?'s':''}${refs.length?' · '+refs.length+' invoice'+(refs.length>1?'s':''):''}`,true);
   outLines=[{sku:'',cases:0,pcs:0,expiry:''}];
+  outRefs=[''];
   setTimeout(()=>render(),1100);
 }
 
@@ -1571,17 +1613,21 @@ function renderTransfer(){
   ${canEdit()?`<div class="card"><div class="ch" style="background:#eff6ff;border-bottom-color:#bfdbfe;color:#1e40af">🔄 Transfer Between Locations</div><div class="cb">
     <div class="frow f2">
       <div class="fg"><label>Date *</label><input type="date" id="ft-date" value="${TODAY}"/></div>
-      <div class="fg"><label>Product / SKU *</label><select id="ft-sku" onchange="onSkuChange('ft')"><option value="">Select...</option>${products.map(p=>`<option value="${p.sku}">${esc(p.sku)} — ${esc(p.name)}</option>`).join('')}</select></div>
+      <div class="fg"><label>Product / SKU *</label><select id="ft-sku" onchange="onTfChange()"><option value="">Select...</option>${products.map(p=>`<option value="${p.sku}">${esc(p.sku)} — ${esc(p.name)}</option>`).join('')}</select></div>
     </div>
     <div class="frow f2">
-      <div class="fg"><label>From Location *</label><select id="ft-from"><option value="">From...</option>${locs.map(l=>`<option value="${l.id}">${l.icon} ${esc(l.name)}</option>`).join('')}</select></div>
+      <div class="fg"><label>From Location *</label><select id="ft-from" onchange="onTfChange()"><option value="">From...</option>${locs.map(l=>`<option value="${l.id}">${l.icon} ${esc(l.name)}</option>`).join('')}</select></div>
       <div class="fg"><label>To Location *</label><select id="ft-to"><option value="">To...</option>${locs.map(l=>`<option value="${l.id}">${l.icon} ${esc(l.name)}</option>`).join('')}</select></div>
     </div>
     <div id="ft-info" style="display:none;background:#eff6ff;border-radius:8px;padding:8px 12px;margin-bottom:10px;font-size:11px;color:#1e40af;font-weight:700"></div>
+    <div class="fg"><label>Expiry Batch to Transfer *</label>
+      <select id="ft-expiry-sel" onchange="onTfExpiryPick()"><option value="">Select product & source location first...</option></select>
+      <div class="fnote" id="ft-expiry-note">The transfer keeps the same expiry date. Choose "Auto (FEFO)" to let the system pick the nearest-expiry stock first.</div>
+    </div>
     <div class="frow f3">
       <div class="fg"><label>Cases *</label><input type="number" id="ft-cases" min="0" value="0" oninput="calcTP('ft')"/></div>
       <div class="fg"><label>Pieces</label><input type="number" id="ft-pcs" min="0" value="0" oninput="calcTP('ft')"/></div>
-      <div class="fg"><label>Batch No.</label><input id="ft-batch" placeholder="Batch"/></div>
+      <div class="fg"><label>Batch No.</label><input id="ft-batch" placeholder="Auto from selection" readonly style="background:#f8fafc"/></div>
     </div>
     <div id="ft-tp" style="display:none;padding:8px 12px;background:#f8fafc;border-radius:8px;font-size:12px;font-weight:700;margin-bottom:10px"></div>
     <div class="fg"><label>Reference</label><input id="ft-ref" placeholder="Transfer reference"/></div>
@@ -1591,13 +1637,14 @@ function renderTransfer(){
   </div></div>
 `:`<div class="al al-b" style="align-self:start">👁 View-only mode — you can browse records but cannot create entries.</div>`}
   <div class="card"><div class="ch">Recent Transfers</div>
-    ${recent.length?`<div class="tw"><table><thead><tr><th>Date</th><th>SKU</th><th>From</th><th>To</th><th class="r">Cs</th><th class="r">Pcs</th><th>Batch</th><th></th></tr></thead><tbody>
+    ${recent.length?`<div class="tw"><table><thead><tr><th>Date</th><th>SKU</th><th>From</th><th>To</th><th class="r">Cs</th><th class="r">Pcs</th><th>Batch</th><th>Expiry</th><th></th></tr></thead><tbody>
       ${recent.map(m=>`<tr>
         <td style="font-size:11px">${fD(m.date)}</td><td class="mono">${esc(m.sku)}</td>
         <td style="font-size:11px">${esc(locMap()[m.fromLoc]?.name||m.fromLoc)}</td>
         <td style="font-size:11px">${esc(locMap()[m.toLoc]?.name||m.toLoc)}</td>
         <td class="r b">${m.cases}</td><td class="r">${m.pcs||0}</td>
         <td style="font-size:11px">${esc(m.batch||'—')}</td>
+        <td style="font-size:11px">${m.expiry?fD(m.expiry):'—'}</td>
         ${canEdit()?`<td><button class="btn br bsm" onclick="delMov('${m.id}')">×</button></td>`:'<td></td>'}
       </tr>`).join('')}
     </tbody></table></div>`:`<div class="cb" style="text-align:center;color:var(--muted);padding:30px">No transfers yet</div>`}
@@ -1718,6 +1765,45 @@ async function saveMov(type){
   ['batch','expiry','party','ref','notes'].forEach(f=>{const el=document.getElementById(pre+'-'+f);if(el)el.value='';});
   setTimeout(()=>render(),800);
 }
+// ── TRANSFER: populate expiry/batch list from source location ──
+function onTfChange(){
+  onSkuChange('ft'); // keep existing info line behaviour
+  const sku=document.getElementById('ft-sku')?.value;
+  const fromLoc=document.getElementById('ft-from')?.value;
+  const sel=document.getElementById('ft-expiry-sel');
+  const note=document.getElementById('ft-expiry-note');
+  if(!sel)return;
+  if(!sku||!fromLoc){
+    sel.innerHTML='<option value="">Select product & source location first...</option>';
+    if(note)note.textContent='The transfer keeps the same expiry date you choose here.';
+    return;
+  }
+  const batches=getBatchStock(fromLoc,sku); // [{expiry,batch,qty}] sorted nearest-first
+  if(!batches.length){
+    sel.innerHTML='<option value="">⚠ No stock at this location</option>';
+    if(note)note.innerHTML='<b style="color:var(--red)">No stock available to transfer from this location.</b>';
+    return;
+  }
+  const ppc=getPPC(sku);
+  let opts='<option value="__FEFO__">⚡ Auto (FEFO) — nearest expiry first</option>';
+  batches.forEach((b,i)=>{
+    const lbl=b.expiry?fD(b.expiry):'No expiry';
+    const d=b.expiry?daysUntilExpiry(b.expiry):null;
+    const tag=d===null?'':d<0?' (EXPIRED)':d<=30?` (${d}d left ⚠)`:` (${d}d)`;
+    opts+=`<option value="${i}" data-expiry="${b.expiry||''}" data-batch="${esc(b.batch||'')}" data-qty="${b.qty}">${lbl}${tag} — ${cpStr(b.qty,ppc)}${b.batch?' · '+esc(b.batch):''}</option>`;
+  });
+  sel.innerHTML=opts;
+  if(note)note.textContent='Choose a specific expiry batch, or Auto (FEFO) to dispatch nearest-expiry stock first.';
+  onTfExpiryPick();
+}
+function onTfExpiryPick(){
+  const sel=document.getElementById('ft-expiry-sel');
+  const batchInput=document.getElementById('ft-batch');
+  if(!sel||!batchInput)return;
+  const opt=sel.options[sel.selectedIndex];
+  if(!opt||sel.value==='__FEFO__'||sel.value===''){batchInput.value='';return;}
+  batchInput.value=opt.getAttribute('data-batch')||'';
+}
 async function saveTF(){
   const date=document.getElementById('ft-date').value;
   const sku=document.getElementById('ft-sku').value;
@@ -1725,19 +1811,32 @@ async function saveTF(){
   const toLoc=document.getElementById('ft-to').value;
   const cases=parseInt(document.getElementById('ft-cases').value)||0;
   const pcs=parseInt(document.getElementById('ft-pcs').value)||0;
-  const batch=document.getElementById('ft-batch').value.trim();
   const ref=document.getElementById('ft-ref').value.trim();
   const notes=document.getElementById('ft-notes').value.trim();
+  const expSel=document.getElementById('ft-expiry-sel');
   if(!date||!sku||!fromLoc||!toLoc){msg('ft-msg','⚠ Fill all required fields',false);return;}
   if(fromLoc===toLoc){msg('ft-msg','⚠ From and To cannot be the same',false);return;}
   if(cases===0&&pcs===0){msg('ft-msg','⚠ Quantity cannot be zero',false);return;}
+  if(!expSel||!expSel.value){msg('ft-msg','⚠ Select an expiry batch to transfer',false);return;}
   const ppc=getPPC(sku);const totalPcs=cases*ppc+(pcs||0);
-  await fefoSplit(fromLoc,sku,totalPcs,async(take,b)=>{
-    await insertMov({id:uid(),date,sku,type:'TF',fromLoc,toLoc,locId:fromLoc,cases:Math.floor(take/ppc),pcs:take%ppc,batch:b.batch||batch,expiry:b.expiry||'',ref,notes,createdBy:currentUser?.name||'',ts:Date.now()});
-  });
-  logAction('TRANSFER',sku+' — '+cases+'cs from '+fromLoc+' to '+toLoc);
-  msg('ft-msg','✅ Transfer saved!',true);
-  setTimeout(()=>render(),800);
+  const pick=expSel.value;
+  if(pick==='__FEFO__'){
+    // Auto FEFO — system splits across nearest-expiry batches
+    await fefoSplit(fromLoc,sku,totalPcs,async(take,b)=>{
+      await insertMov({id:uid(),date,sku,type:'TF',fromLoc,toLoc,locId:fromLoc,cases:Math.floor(take/ppc),pcs:take%ppc,batch:b.batch||'',expiry:b.expiry||'',ref,notes,createdBy:currentUser?.name||'',ts:Date.now()});
+    });
+  }else{
+    // Specific batch chosen → transfer keeps that exact expiry/batch
+    const opt=expSel.options[expSel.selectedIndex];
+    const pickExpiry=opt.getAttribute('data-expiry')||'';
+    const pickBatch=opt.getAttribute('data-batch')||'';
+    const avail=parseInt(opt.getAttribute('data-qty'))||0;
+    if(totalPcs>avail){msg('ft-msg',`⚠ Only ${cpStr(avail,ppc)} available in this batch. Reduce quantity or pick Auto (FEFO).`,false);return;}
+    await insertMov({id:uid(),date,sku,type:'TF',fromLoc,toLoc,locId:fromLoc,cases:Math.floor(totalPcs/ppc),pcs:totalPcs%ppc,batch:pickBatch,expiry:pickExpiry,ref,notes,createdBy:currentUser?.name||'',ts:Date.now()});
+  }
+  logAction('TRANSFER',sku+' — '+cpStr(totalPcs,ppc)+' from '+fromLoc+' to '+toLoc);
+  msg('ft-msg','✅ Transfer saved — stock moved with its expiry date.',true);
+  setTimeout(()=>render(),900);
 }
 async function saveAdj(){
   const date=document.getElementById('fa-date').value;
