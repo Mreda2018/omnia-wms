@@ -2544,7 +2544,11 @@ async function applyFinDecision(a,decision){
   const newStatus=decision==='approved'?'approved':'rejected';
   if(type==='expense'){
     const e=expenses.find(x=>x.id===a.targetId);
-    if(e){e.status=newStatus;saveExp();if(SB&&!useLocal){try{await SB.from('expenses').update({status:newStatus}).eq('id',e.id);}catch(err){console.error(err);}}}
+    if(e){e.status=newStatus;saveExp();if(SB&&!useLocal){try{await SB.from('expenses').update({status:newStatus}).eq('id',e.id);}catch(err){console.error(err);}}
+      // sync bank: deduct on approve (if bank method), remove on reject
+      if(newStatus==='approved'&&isBankMethod(e.method)){await syncBankFromSource('expense',e.id,{date:e.date,direction:'out',amount:e.gross,category:e.category||'Other Expense',method:e.method,ref:e.ref||'',party:e.vendor||'',notes:e.category+(e.desc?' — '+e.desc:'')});}
+      else if(newStatus==='rejected'){await syncBankFromSource('expense',e.id,null);}
+    }
   }else if(type==='payment'){
     const p=payments.find(x=>x.id===a.targetId);
     if(p){p.status=newStatus;savePay();if(SB&&!useLocal){try{await SB.from('payments').update({status:newStatus}).eq('id',p.id);}catch(err){console.error(err);}}
@@ -5069,11 +5073,11 @@ function renderCash(){
       <div class="frow f3" style="margin-bottom:10px">
         <div class="fg"><label>Type</label><select id="pc-type" onchange="onPettyTypeChange()"><option value="out">⬆ Expense (out)</option><option value="in">⬇ Top-up / Add (in)</option></select></div>
         <div class="fg"><label>Date</label><input type="date" id="pc-date" value="${TODAY}"/></div>
-        <div class="fg"><label>Amount (AED)</label><input type="number" id="pc-amount" min="0" step="0.01" placeholder="0.00"/></div>
+        <div class="fg"><label>Amount (AED)</label><input type="number" id="pc-amount" min="0" step="0.01" placeholder="0.00" oninput="onPettyCashSrc()"/></div>
       </div>
       <div id="pc-source-row" style="display:none;margin-bottom:10px;background:#f0fdf9;border:1px solid #a7f3d0;border-radius:9px;padding:10px 12px">
         <label style="font-size:12px;font-weight:700;color:#065f46;display:block;margin-bottom:6px">💵 Fund this top-up from collected cash? <span style="font-weight:400;color:var(--muted)">(optional)</span></label>
-        <select id="pc-cashsrc" onchange="onPettyCashSrc()" style="width:100%;padding:8px;border:1.5px solid #4DB78C;border-radius:7px;font-size:12px;background:#fff">
+        <select id="pc-cashsrc" onchange="onPettyCashSrc(true)" style="width:100%;padding:8px;border:1.5px solid #4DB78C;border-radius:7px;font-size:12px;background:#fff">
           <option value="">— No, manual top-up —</option>
           <option value="__ALL__">Use total uncollected cash on hand</option>
           <option value="__CUSTOM__">Custom amount from collected cash</option>
@@ -5345,15 +5349,17 @@ function onPettyTypeChange(){
   const row=document.getElementById('pc-source-row');
   if(row)row.style.display=type==='in'?'block':'none';
 }
-function onPettyCashSrc(){
+function onPettyCashSrc(fromPicker){
   const src=document.getElementById('pc-cashsrc')?.value;
   const avail=cashOnHandAvailable();
   const info=document.getElementById('pc-cash-info');
   const amtEl=document.getElementById('pc-amount');
   if(!info)return;
   if(src==='__ALL__'){
-    if(amtEl)amtEl.value=avail>0?avail.toFixed(2):'0';
-    info.innerHTML=`Collected cash on hand: <b>${fmtAED(avail)}</b> → will all move to petty cash. Remaining cash: <b>${fmtAED(0)}</b>`;
+    // only auto-fill the amount when the dropdown itself was just changed
+    if(fromPicker&&amtEl)amtEl.value=avail>0?avail.toFixed(2):'0';
+    const entered=+amtEl?.value||0;
+    info.innerHTML=`Collected cash on hand: <b>${fmtAED(avail)}</b> · Taking: <b>${fmtAED(entered)}</b> · Remaining: <b>${fmtAED(Math.max(0,avail-entered))}</b>`;
   }else if(src==='__CUSTOM__'){
     const entered=+amtEl?.value||0;
     info.innerHTML=`Collected cash on hand: <b>${fmtAED(avail)}</b> · Taking: <b>${fmtAED(entered)}</b> · Remaining: <b>${fmtAED(Math.max(0,avail-entered))}</b>`;
@@ -5744,9 +5750,12 @@ function renderAccounting(){
       <tr><td style="font-weight:700">Revenue (net of returns)</td><td class="r b">${fmtAED(revenue)}</td></tr>
       <tr><td style="padding-left:24px;color:var(--muted)">Less: Cost of Goods Sold</td><td class="r" style="color:#b45309">(${fmtAED(cogs)})</td></tr>
       <tr style="border-top:1px solid var(--border)"><td style="font-weight:700">Gross Profit</td><td class="r b" style="color:#1d4ed8">${fmtAED(grossProfit)} <span style="font-size:10px;color:var(--muted)">(${margin.toFixed(1)}%)</span></td></tr>
-      <tr><td style="padding-left:24px;color:var(--muted)">Less: Operating Expenses</td><td class="r" style="color:#b45309">(${fmtAED(expenses)})</td></tr>
+      ${expModule>0?`<tr><td style="padding-left:24px;color:var(--muted)">Less: Operating Expenses</td><td class="r" style="color:#b45309">(${fmtAED(expModule)})</td></tr>`:''}
+      ${pettyExp>0?`<tr><td style="padding-left:24px;color:var(--muted)">Less: Petty Cash Expenses</td><td class="r" style="color:#b45309">(${fmtAED(pettyExp)})</td></tr>`:''}
+      ${(expModule<=0&&pettyExp<=0)?`<tr><td style="padding-left:24px;color:var(--muted)">Less: Operating Expenses</td><td class="r" style="color:#b45309">(${fmtAED(0)})</td></tr>`:''}
       <tr class="tfoot"><td class="b">NET PROFIT</td><td class="r b" style="font-size:15px;color:${netProfit>=0?'#15803d':'#b91c1c'}">${fmtAED(netProfit)}</td></tr>
-    </tbody></table></div></div>`;
+    </tbody></table></div>
+    <div class="al al-b no-print" style="margin-top:12px;font-size:11px">ℹ️ <b>Profit & Loss = Income Statement</b> — same report. The <b>Financial Statements → Income Statement</b> tab shows identical figures next to the Balance Sheet. Bank-paid expenses (salaries, rent, etc.) are recorded in the Expenses module and deducted from the bank automatically.</div></div>`;
   }
 
   // ── CORPORATE TAX (estimate) ──
@@ -5919,11 +5928,12 @@ function renderFinStatements(){
       ${row('Revenue (net of VAT)',revenue,{bold:true})}
       ${row('Less: Cost of Goods Sold',-cogs,{indent:true,color:'#b91c1c'})}
       ${row('Gross Profit',grossProfit,{bold:true,bg:'#f8fafc'})}
-      ${row('Less: Operating Expenses',-expenses,{indent:true,color:'#b91c1c'})}
+      ${(()=>{const pettyExp=(typeof pettyCash!=='undefined'?pettyCash:[]).filter(e=>isApprovedRec(e)&&e.type==='out'&&inFin(e.date)).reduce((a,e)=>a+e.amount,0);const expModule=(typeof expensesNet==='function')?expensesNet(finFrom,finTo):0;return (expModule>0?row('Less: Operating Expenses',-expModule,{indent:true,color:'#b91c1c'}):'')+(pettyExp>0?row('Less: Petty Cash Expenses',-pettyExp,{indent:true,color:'#b91c1c'}):'')+((expModule<=0&&pettyExp<=0)?row('Less: Operating Expenses',0,{indent:true,color:'#b91c1c'}):'');})()}
       <tr style="background:${netProfit>=0?'#f0fdf4':'#fef2f2'}"><td style="font-weight:800;font-size:13px">NET PROFIT</td><td class="r" style="font-weight:800;font-size:15px;color:${netProfit>=0?'#15803d':'#b91c1c'}">${fmtAED(netProfit)}</td></tr>
       <tr><td style="font-size:11px;color:var(--muted)">Gross margin</td><td class="r" style="font-size:11px;color:var(--muted)">${revenue?Math.round(grossProfit/revenue*100):0}%</td></tr>
       <tr><td style="font-size:11px;color:var(--muted)">Net margin</td><td class="r" style="font-size:11px;color:var(--muted)">${revenue?Math.round(netProfit/revenue*100):0}%</td></tr>
-    </tbody></table></div></div>`;
+    </tbody></table></div>
+    <div class="al al-b no-print" style="margin-top:12px;font-size:11px">ℹ️ <b>Income Statement = Profit & Loss</b> — same report, two names. This one lives with the financial statements; the <b>Accounting → P&L</b> tab shows the same figures alongside VAT and corporate tax. Expenses include both the Expenses module and petty-cash spending. Bank-paid expenses are deducted from the bank automatically.</div></div>`;
   }
 
   document.getElementById('content').innerHTML=`
@@ -6065,12 +6075,16 @@ async function saveExpense(){
   const net=+(gross-vatAmount).toFixed(2);
   const e={id:uid(),date,category:document.getElementById('exp-cat').value,desc:document.getElementById('exp-desc').value.trim(),vendor:document.getElementById('exp-vendor').value.trim(),gross:+gross.toFixed(2),hasVat,vatAmount,net,method:document.getElementById('exp-method').value,ref:document.getElementById('exp-ref').value.trim(),by:currentUser?.name||'',status:needsFinApproval()?'pending':'approved',ts:Date.now()};
   expenses.push(e);await dbInsertExp(e);saveExp();
-  await logAction('EXPENSE_RECORDED',e.category+' — '+fmtAED(e.gross)+(hasVat?' (incl VAT '+fmtAED(vatAmount)+')':'')+(e.vendor?' — '+e.vendor:'')+(e.status==='pending'?' [PENDING APPROVAL]':''));
+  // auto-deduct from bank if paid by a bank method (bank/cheque/card) and approved
+  if(e.status==='approved'&&isBankMethod(e.method)){
+    await syncBankFromSource('expense',e.id,{date:e.date,direction:'out',amount:e.gross,category:e.category||'Other Expense',method:e.method,ref:e.ref||'',party:e.vendor||'',notes:e.category+(e.desc?' — '+e.desc:'')});
+  }
+  await logAction('EXPENSE_RECORDED',e.category+' — '+fmtAED(e.gross)+(hasVat?' (incl VAT '+fmtAED(vatAmount)+')':'')+(e.vendor?' — '+e.vendor:'')+(e.status==='pending'?' [PENDING APPROVAL]':'')+(isBankMethod(e.method)&&e.status==='approved'?' [→ Bank]':''));
   if(e.status==='pending'){await createFinApproval('expense',e.id,e.category+' '+fmtAED(e.gross),e.gross);msg('exp-msg','✅ Expense submitted — pending management approval before it counts in reports.',true);}
-  else msg('exp-msg','✅ Expense saved!',true);
+  else msg('exp-msg','✅ Expense saved!'+(isBankMethod(e.method)?' Deducted from bank.':''),true);
   setTimeout(()=>render(),900);
 }
-async function delExpense(id){const e=expenses.find(x=>x.id===id);if(!e)return;if(!confirm('Delete this expense?'))return;expenses=expenses.filter(x=>x.id!==id);await dbDelExp(id);saveExp();await logAction('EXPENSE_DELETED',e.category+' — '+fmtAED(e.gross));render();}
+async function delExpense(id){const e=expenses.find(x=>x.id===id);if(!e)return;if(!confirm('Delete this expense?'))return;expenses=expenses.filter(x=>x.id!==id);await dbDelExp(id);saveExp();await syncBankFromSource('expense',id,null);await logAction('EXPENSE_DELETED',e.category+' — '+fmtAED(e.gross));render();}
 function exportExpensesCSV(){
   ensureExpRange();
   const rows=expenses.filter(e=>inExp(e.date)&&(expCatFilter==='all'||e.category===expCatFilter)).sort((a,b)=>a.ts-b.ts).map(e=>[e.date,e.category,e.vendor||'',e.desc||'',e.method||'',e.net.toFixed(2),e.hasVat?e.vatAmount.toFixed(2):'0.00',e.gross.toFixed(2),e.ref||'',e.by||'']);
