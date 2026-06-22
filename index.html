@@ -1444,8 +1444,12 @@ function snapOut(){const g=id=>document.getElementById(id)?.value;
   if(refEls.length)outRefs=Array.from(refEls).map(e=>e.value);
   return{date:g('fo-date'),party:g('fo-party'),driver:g('fo-driver'),notes:g('fo-notes')};}
 function restOut(v){if(!v)return;const s=(id,val)=>{const el=document.getElementById(id);if(el&&val!==undefined&&val!==null&&val!=='')el.value=val;};s('fo-date',v.date);s('fo-party',v.party);s('fo-driver',v.driver);s('fo-notes',v.notes);}
-function addOutRef(){const refEls=document.querySelectorAll('.fo-ref-input');if(refEls.length)outRefs=Array.from(refEls).map(e=>e.value);outRefs.push('');reOut();}
-function removeOutRef(i){const refEls=document.querySelectorAll('.fo-ref-input');if(refEls.length)outRefs=Array.from(refEls).map(e=>e.value);outRefs.splice(i,1);if(!outRefs.length)outRefs=[''];reOut();}
+// Snapshot only the text fields (NOT the refs — caller manages outRefs directly)
+function snapOutFields(){const g=id=>document.getElementById(id)?.value;return{date:g('fo-date'),party:g('fo-party'),driver:g('fo-driver'),notes:g('fo-notes')};}
+// Capture current ref inputs from the DOM into outRefs
+function captureRefs(){const refEls=document.querySelectorAll('.fo-ref-input');if(refEls.length)outRefs=Array.from(refEls).map(e=>e.value);}
+function addOutRef(){captureRefs();const fields=snapOutFields();outRefs.push('');renderOut();restOut(fields);}
+function removeOutRef(i){captureRefs();const fields=snapOutFields();outRefs.splice(i,1);if(!outRefs.length)outRefs=[''];renderOut();restOut(fields);}
 // Invoices created (by Sales) on a given date — for Naif to pick from in Stock Out
 function invoicesForDate(date){
   if(!date)return[];
@@ -1454,17 +1458,16 @@ function invoicesForDate(date){
 // Naif picks an invoice from the dropdown → add its number to the ref list (+ auto-fill customer)
 function pickInvoiceForOut(invNo){
   if(!invNo)return;
-  const refEls=document.querySelectorAll('.fo-ref-input');
-  if(refEls.length)outRefs=Array.from(refEls).map(e=>e.value);
+  captureRefs();
   // avoid duplicates; fill into first empty slot or append
   if(outRefs.includes(invNo)){msg('fo-msg','⚠ '+invNo+' already added',false);return;}
   const emptyIdx=outRefs.findIndex(r=>!r.trim());
   if(emptyIdx>=0)outRefs[emptyIdx]=invNo;else outRefs.push(invNo);
+  const fields=snapOutFields();
   // auto-fill customer name if empty
   const inv=invoices.find(i=>i.invNo===invNo);
-  const partyEl=document.getElementById('fo-party');
-  if(inv&&partyEl&&!partyEl.value.trim()){partyEl.value=inv.customerName||'';}
-  const snap=snapOut();reOut();restOut(snap);
+  if(inv&&!(fields.party||'').trim())fields.party=inv.customerName||'';
+  renderOut();restOut(fields);
 }
 function reOut(){const v=snapOut();renderOut();restOut(v);}
 function renderOut(){
