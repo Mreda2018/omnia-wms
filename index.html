@@ -283,6 +283,8 @@ input:focus,select:focus,textarea:focus{border-color:var(--g);background:var(--w
     <div class="ni" id="nav-payments" onclick="go('payments')"><span class="ic">💵</span>Payments</div>
     <div class="ni" id="nav-statement" onclick="go('statement')"><span class="ic">📑</span>Customer Statements</div>
     <div class="ni" id="nav-cash" onclick="go('cash')"><span class="ic">💰</span>Cash Management</div>
+    <div class="ni" id="nav-bank" onclick="go('bank')"><span class="ic">🏦</span>Bank Account</div>
+    <div class="ni" id="nav-loans" onclick="go('loans')"><span class="ic">🏷️</span>Loans</div>
     <div class="ni" id="nav-suppliers" onclick="go('suppliers')"><span class="ic">🌍</span>Suppliers / Import</div>
     <div class="ni" id="nav-expenses" onclick="go('expenses')"><span class="ic">💸</span>Expenses</div>
     <div class="ni" id="nav-assets" onclick="go('assets')"><span class="ic">🏛</span>Fixed Assets</div>
@@ -474,11 +476,11 @@ const DEFAULT_ROLES={
   // 🧾 المبيعات — Sales: invoices, customers, payments, returns, delivery
   sales:['dashboard','out','rep-all','outrep','invoices','customers','sales','returns','delivery','payments','statement','expenses','approvals','einvoice'],
   // 🧮 الحسابات — Accountant: all financial/accounting modules + read sales
-  accountant:['dashboard','rep-all','invoices','customers','sales','payments','statement','cash','suppliers','expenses','assets','accounting','bookkeeping','finstate','einvoice'],
+  accountant:['dashboard','rep-all','invoices','customers','sales','payments','statement','cash','bank','loans','suppliers','expenses','assets','accounting','bookkeeping','finstate','einvoice'],
   // 🛡️ الإدارة — Management: everything except user management
-  management:['dashboard','in','out','transfer','adjust','log','rep-all','outrep','inrep','expiry','products','opening','locations','invoices','customers','sales','returns','delivery','payments','statement','cash','suppliers','expenses','assets','accounting','bookkeeping','finstate','approvals','einvoice','audit'],
+  management:['dashboard','in','out','transfer','adjust','log','rep-all','outrep','inrep','expiry','products','opening','locations','invoices','customers','sales','returns','delivery','payments','statement','cash','bank','loans','suppliers','expenses','assets','accounting','bookkeeping','finstate','approvals','einvoice','audit'],
   // 👁 Viewer — read-only of everything except users
-  viewer:['dashboard','in','out','transfer','adjust','log','rep-all','outrep','inrep','expiry','products','opening','locations','invoices','customers','sales','returns','delivery','payments','statement','cash','suppliers','expenses','assets','accounting','bookkeeping','finstate','approvals','einvoice','audit'],
+  viewer:['dashboard','in','out','transfer','adjust','log','rep-all','outrep','inrep','expiry','products','opening','locations','invoices','customers','sales','returns','delivery','payments','statement','cash','bank','loans','suppliers','expenses','assets','accounting','bookkeeping','finstate','approvals','einvoice','audit'],
 };
 // Admin-customised role pages loaded from Supabase (overrides defaults). admin always = 'all'.
 let roleOverrides={};
@@ -611,7 +613,7 @@ async function doLogin(){
     logAction('LOGIN',email);
     try{updateUserUI();}catch(e){console.error('updateUserUI:',e);}
     resetIdleTimer();
-    try{await loadFromDB();await loadSalesFromDB();await loadReturnsFromDB();await loadDNFromDB();await loadApprovalsFromDB();await loadPaymentsFromDB();await loadPettyFromDB();await loadSupFromDB();await loadSupPayFromDB();await loadExpFromDB();await loadAssetsFromDB();await loadRoleOverridesFromDB();}catch(e){console.error('loadFromDB:',e);load();load2();}
+    try{await loadFromDB();await loadSalesFromDB();await loadReturnsFromDB();await loadDNFromDB();await loadApprovalsFromDB();await loadPaymentsFromDB();await loadPettyFromDB();await loadSupFromDB();await loadSupPayFromDB();await loadExpFromDB();await loadAssetsFromDB();await loadRoleOverridesFromDB();await loadBankFromDB();await loadLoansFromDB();}catch(e){console.error('loadFromDB:',e);load();load2();}
     try{subscribeRealtime();}catch(e){console.error('realtime:',e);}
     try{setTimeout(checkBackupReminder,1500);}catch(e){}
     try{go('dashboard');}catch(e){console.error('go:',e);document.getElementById('content').innerHTML='<div style="padding:40px;text-align:center;color:red">Error: '+e.message+'</div>';}
@@ -979,6 +981,8 @@ const pageInfo={
   payments:['Payments / Receipts','Record customer payments and print receipts'],
   statement:['Customer Statements','Account ledger & outstanding balances'],
   cash:['Cash Management','Collected cash, petty cash & cash flow'],
+  bank:['Bank Account','Company bank balance, deposits & payments'],
+  loans:['Loans','Short & long-term loans (liabilities)'],
   suppliers:['Suppliers / Import','Manage import suppliers & purchase orders (EUR/AED)'],
   expenses:['Expenses','Business expenses by category with recoverable VAT'],
   assets:['Fixed Assets','Company assets & depreciation (straight-line)'],
@@ -1214,7 +1218,7 @@ function render(){
   try{
     renderLocNav();
     if(typeof updateApprBadge==='function')updateApprBadge();
-    const map={dashboard:renderDashboard,in:renderIn,out:renderOut,transfer:renderTransfer,adjust:renderAdjust,log:renderLog,expiry:renderExpiry,products:renderProducts,opening:renderOpening,locations:renderLocations,invoices:renderInvoices,customers:renderCustomers,sales:renderSales,returns:renderReturns,delivery:renderDelivery,payments:renderPayments,statement:renderStatement,cash:renderCash,suppliers:renderSuppliers,expenses:renderExpenses,assets:renderAssets,accounting:renderAccounting,bookkeeping:renderBookkeeping,finstate:renderFinStatements,einvoice:renderEInvoiceQueue,approvals:renderApprovals,audit:renderAudit,users:renderUsers,datausage:renderDataUsage,outrep:renderOutReport,inrep:renderInReport};
+    const map={dashboard:renderDashboard,in:renderIn,out:renderOut,transfer:renderTransfer,adjust:renderAdjust,log:renderLog,expiry:renderExpiry,products:renderProducts,opening:renderOpening,locations:renderLocations,invoices:renderInvoices,customers:renderCustomers,sales:renderSales,returns:renderReturns,delivery:renderDelivery,payments:renderPayments,statement:renderStatement,cash:renderCash,suppliers:renderSuppliers,expenses:renderExpenses,assets:renderAssets,accounting:renderAccounting,bookkeeping:renderBookkeeping,finstate:renderFinStatements,einvoice:renderEInvoiceQueue,approvals:renderApprovals,audit:renderAudit,users:renderUsers,datausage:renderDataUsage,bank:renderBank,loans:renderLoans,outrep:renderOutReport,inrep:renderInReport};
     if(curPage.startsWith('rep-'))renderReport(curPage==='rep-all'?null:curPage.replace('rep-',''));
     else(map[curPage]||renderDashboard)();
     updateExpBadge();
@@ -2413,7 +2417,7 @@ function save2(){
   localStorage.setItem('wms_invoices',JSON.stringify(invoices));
 }
 function load2(){
-  customers=JSON.parse(localStorage.getItem('wms_customers')||'[]');loadRet();loadDN();loadAppr();loadPay();loadPetty();loadSup();loadExp();loadAssets();loadSupPay();loadRoleOverrides();loadRoleFinApproval();
+  customers=JSON.parse(localStorage.getItem('wms_customers')||'[]');loadRet();loadDN();loadAppr();loadPay();loadPetty();loadSup();loadExp();loadAssets();loadSupPay();loadRoleOverrides();loadRoleFinApproval();loadBank();loadLoans();
   invoices=JSON.parse(localStorage.getItem('wms_invoices')||'[]');
   auditLog=JSON.parse(localStorage.getItem('wms_audit')||'[]');
 }
@@ -2573,7 +2577,11 @@ async function applyFinDecision(a,decision){
     if(e){e.status=newStatus;saveExp();if(SB&&!useLocal){try{await SB.from('expenses').update({status:newStatus}).eq('id',e.id);}catch(err){console.error(err);}}}
   }else if(type==='payment'){
     const p=payments.find(x=>x.id===a.targetId);
-    if(p){p.status=newStatus;savePay();if(SB&&!useLocal){try{await SB.from('payments').update({status:newStatus}).eq('id',p.id);}catch(err){console.error(err);}}}
+    if(p){p.status=newStatus;savePay();if(SB&&!useLocal){try{await SB.from('payments').update({status:newStatus}).eq('id',p.id);}catch(err){console.error(err);}}
+      // sync bank: add on approve (if bank method), remove on reject
+      if(newStatus==='approved'&&isBankMethod(p.method)){await syncBankFromSource('payment',p.id,{date:p.date,direction:'in',amount:p.amount,category:'Customer Receipt',method:p.method,ref:p.ref||p.rcptNo,party:p.customerName,notes:'Receipt '+p.rcptNo});}
+      else if(newStatus==='rejected'){await syncBankFromSource('payment',p.id,null);}
+    }
   }else if(type==='petty'){
     const p=pettyCash.find(x=>x.id===a.targetId);
     if(p){p.status=newStatus;savePetty();if(SB&&!useLocal){try{await SB.from('petty_cash').update({status:newStatus}).eq('id',p.id);}catch(err){console.error(err);}}}
@@ -3502,7 +3510,7 @@ function exportInRepCSV(){
 
 // ══ USERS MANAGEMENT (admin only) ══
 let usersList=[];
-const ALL_PAGES=[['dashboard','📊 Dashboard'],['in','📥 Stock In'],['out','📤 Stock Out'],['transfer','🔄 Transfer'],['adjust','⚖ Adjustment'],['log','📜 Movements Log'],['rep-all','📈 Stock Reports'],['outrep','📤 Stock Out Report'],['inrep','📥 Stock In Report'],['expiry','⏰ Expiry Report'],['products','📦 Products'],['opening','🔢 Opening Balances'],['locations','📍 Locations'],['invoices','🧾 Tax Invoices'],['customers','👥 Customers'],['sales','💰 Sales Report'],['returns','↩ Sales Returns'],['delivery','🚚 Delivery Notes'],['payments','💵 Payments'],['statement','📑 Customer Statements'],['cash','💰 Cash Management'],['suppliers','🌍 Suppliers / Import'],['expenses','💸 Expenses'],['assets','🏛 Fixed Assets'],['accounting','🧮 Accounting & Tax'],['bookkeeping','📓 Bookkeeping'],['finstate','🏦 Financial Statements'],['einvoice','📋 E-Invoicing']];
+const ALL_PAGES=[['dashboard','📊 Dashboard'],['in','📥 Stock In'],['out','📤 Stock Out'],['transfer','🔄 Transfer'],['adjust','⚖ Adjustment'],['log','📜 Movements Log'],['rep-all','📈 Stock Reports'],['outrep','📤 Stock Out Report'],['inrep','📥 Stock In Report'],['expiry','⏰ Expiry Report'],['products','📦 Products'],['opening','🔢 Opening Balances'],['locations','📍 Locations'],['invoices','🧾 Tax Invoices'],['customers','👥 Customers'],['sales','💰 Sales Report'],['returns','↩ Sales Returns'],['delivery','🚚 Delivery Notes'],['payments','💵 Payments'],['statement','📑 Customer Statements'],['cash','💰 Cash Management'],['bank','🏦 Bank Account'],['loans','🏷️ Loans'],['suppliers','🌍 Suppliers / Import'],['expenses','💸 Expenses'],['assets','🏛 Fixed Assets'],['accounting','🧮 Accounting & Tax'],['bookkeeping','📓 Bookkeeping'],['finstate','🏦 Financial Statements'],['einvoice','📋 E-Invoicing']];
 async function refreshUsers(){
   if(SB&&!useLocal){
     try{
@@ -3631,7 +3639,7 @@ function renderUsers(){
       ['Overview',[['dashboard','📊 Dashboard']]],
       ['Stock Operations',[['in','📥 Stock In'],['out','📤 Stock Out'],['transfer','🔄 Transfer'],['adjust','⚖ Adjustment'],['log','📜 Movements Log']]],
       ['Sales',[['invoices','🧾 Tax Invoices'],['customers','👥 Customers'],['sales','💰 Sales Report'],['returns','↩ Sales Returns'],['delivery','🚚 Delivery Notes'],['einvoice','📋 E-Invoicing']]],
-      ['Finance & Accounting',[['payments','💵 Payments'],['statement','📑 Customer Statements'],['cash','💰 Cash Management'],['suppliers','🌍 Suppliers / Import'],['expenses','💸 Expenses'],['assets','🏛 Fixed Assets'],['finstate','🏦 Financial Statements'],['accounting','🧮 Accounting & Tax'],['bookkeeping','📓 Bookkeeping']]],
+      ['Finance & Accounting',[['payments','💵 Payments'],['statement','📑 Customer Statements'],['cash','💰 Cash Management'],['bank','🏦 Bank Account'],['loans','🏷️ Loans'],['suppliers','🌍 Suppliers / Import'],['expenses','💸 Expenses'],['assets','🏛 Fixed Assets'],['finstate','🏦 Financial Statements'],['accounting','🧮 Accounting & Tax'],['bookkeeping','📓 Bookkeeping']]],
       ['Workflow & Reports',[['approvals','✅ Approvals'],['rep-all','📊 Stock Reports'],['outrep','📤 Stock Out Report'],['inrep','📥 Stock In Report'],['expiry','⏰ Expiry Report']]],
       ['Master Data',[['products','🗂 Products'],['opening','🏁 Opening Balances'],['locations','📍 Locations'],['audit','🔒 Audit Log']]],
     ];
@@ -4328,7 +4336,11 @@ async function savePayment(){
   payments.push(p);await dbInsertPayment(p);
   // auto-mark invoice paid if full payment against it (only if approved)
   if(p.againstInv&&p.status==='approved'){const inv=invoices.find(i=>i.invNo===p.againstInv&&!i.cancelled);if(inv&&p.amount>=inv.total-0.01&&inv.payStatus!=='paid'){inv.payStatus='paid';inv.paidAt=Date.now();await dbUpdateInvoice(inv);}}
-  await logAction('PAYMENT_RECEIVED','Receipt '+p.rcptNo+' — '+custName+' — '+fmtAED(p.amount)+(p.againstInv?' against '+p.againstInv:' (on account)')+(p.status==='pending'?' [PENDING APPROVAL]':''));
+  // auto-add to bank if received by a bank method (transfer/cheque/online/card) and approved
+  if(p.status==='approved'&&isBankMethod(p.method)){
+    await syncBankFromSource('payment',p.id,{date:p.date,direction:'in',amount:p.amount,category:'Customer Receipt',method:p.method,ref:p.ref||p.rcptNo,party:custName,notes:'Receipt '+p.rcptNo});
+  }
+  await logAction('PAYMENT_RECEIVED','Receipt '+p.rcptNo+' — '+custName+' — '+fmtAED(p.amount)+(p.againstInv?' against '+p.againstInv:' (on account)')+(p.status==='pending'?' [PENDING APPROVAL]':'')+(isBankMethod(p.method)?' [→ Bank]':''));
   savePay();
   if(p.status==='pending'){await createFinApproval('payment',p.id,'Receipt '+p.rcptNo+' '+custName,p.amount);msg('pay-msg','✅ Receipt submitted — pending management approval before it counts in reports.',true);setTimeout(()=>render(),900);}
   else{msg('pay-msg','✅ Receipt '+p.rcptNo+' saved!',true);setTimeout(()=>{render();printReceipt(p.id);},800);}
@@ -5001,14 +5013,14 @@ function savePetty(){if(typeof DEMO_MODE!=='undefined'&&DEMO_MODE){demoSave();re
 function loadPetty(){pettyCash=JSON.parse(localStorage.getItem('wms_petty')||'[]');}
 async function dbInsertPetty(e){
   if(!SB||useLocal){savePetty();return;}
-  const{error}=await SB.from('petty_cash').insert({id:e.id,date:e.date,type:e.type,amount:e.amount,category:e.category||null,description:e.desc||null,created_by:e.by||null,ts:e.ts});
+  const{error}=await SB.from('petty_cash').insert({id:e.id,date:e.date,type:e.type,amount:e.amount,category:e.category||null,description:(e.fromCash?'[from-cash] ':'')+(e.desc||''),created_by:e.by||null,ts:e.ts});
   if(error){console.error('petty insert:',error);alert('⚠ Could not save petty cash entry: '+error.message+'\nMake sure cash_setup.sql has been run.');}
 }
 async function dbDeletePetty(id){if(!SB||useLocal){savePetty();return;}await SB.from('petty_cash').delete().eq('id',id);}
 async function loadPettyFromDB(){
   if(!SB)return;
   try{const{data}=await SB.from('petty_cash').select('*').order('date',{ascending:false});
-    pettyCash=(data||[]).map(r=>({id:r.id,date:r.date,type:r.type,amount:+r.amount||0,category:r.category||'',desc:r.description||'',by:r.created_by||'',ts:r.ts||0}));
+    pettyCash=(data||[]).map(r=>{const d=r.description||'';const fromCash=d.startsWith('[from-cash] ');return{id:r.id,date:r.date,type:r.type,amount:+r.amount||0,category:r.category||'',desc:fromCash?d.replace('[from-cash] ',''):d,fromCash,by:r.created_by||'',ts:r.ts||0};});
   }catch(e){console.error('petty load:',e);}
 }
 
@@ -5075,9 +5087,18 @@ function renderCash(){
     </div>
     ${canEditSales()?`<div class="card" style="margin-bottom:14px"><div class="ch" style="background:#f5f3ff;border-bottom-color:#ddd6fe;color:#6d28d9">➕ Add Petty Cash Entry</div><div class="cb">
       <div class="frow f3" style="margin-bottom:10px">
-        <div class="fg"><label>Type</label><select id="pc-type"><option value="out">⬆ Expense (out)</option><option value="in">⬇ Top-up / Add (in)</option></select></div>
+        <div class="fg"><label>Type</label><select id="pc-type" onchange="onPettyTypeChange()"><option value="out">⬆ Expense (out)</option><option value="in">⬇ Top-up / Add (in)</option></select></div>
         <div class="fg"><label>Date</label><input type="date" id="pc-date" value="${TODAY}"/></div>
         <div class="fg"><label>Amount (AED)</label><input type="number" id="pc-amount" min="0" step="0.01" placeholder="0.00"/></div>
+      </div>
+      <div id="pc-source-row" style="display:none;margin-bottom:10px;background:#f0fdf9;border:1px solid #a7f3d0;border-radius:9px;padding:10px 12px">
+        <label style="font-size:12px;font-weight:700;color:#065f46;display:block;margin-bottom:6px">💵 Fund this top-up from collected cash? <span style="font-weight:400;color:var(--muted)">(optional)</span></label>
+        <select id="pc-cashsrc" onchange="onPettyCashSrc()" style="width:100%;padding:8px;border:1.5px solid #4DB78C;border-radius:7px;font-size:12px;background:#fff">
+          <option value="">— No, manual top-up —</option>
+          <option value="__ALL__">Use total uncollected cash on hand</option>
+          <option value="__CUSTOM__">Custom amount from collected cash</option>
+        </select>
+        <div id="pc-cash-info" style="font-size:11px;color:#047857;margin-top:6px;font-weight:600"></div>
       </div>
       <div class="frow f2" style="margin-bottom:10px">
         <div class="fg"><label>Category</label><select id="pc-cat">${PETTY_CATS.map(c=>`<option>${c}</option>`).join('')}</select></div>
@@ -5143,19 +5164,240 @@ function renderCash(){
   </div>
   ${tabContent}`;
 }
+// ══════════ BANK ACCOUNT PAGE ══════════
+let bankFrom='',bankTo='',bankEditId=null;
+function renderBank(){
+  const bal=bankBalance();
+  const tIn=bankInTotal(bankFrom,bankTo),tOut=bankOutTotal(bankFrom,bankTo);
+  const rows=[...bankTxns].filter(t=>(!bankFrom||t.date>=bankFrom)&&(!bankTo||t.date<=bankTo)).sort((a,b)=>(b.date<a.date?-1:b.date>a.date?1:(b.ts||0)-(a.ts||0)));
+  const canEditBank=currentUser&&['admin','accountant','management'].includes(normRole(currentUser.role));
+  document.getElementById('content').innerHTML=`
+  <div class="al al-b no-print" style="margin-bottom:14px">🏦 <b>Company Bank Account</b> — tracks every dirham in and out of the bank. Customer receipts and supplier payments made by <b>transfer / cheque / online</b> are added here automatically. Cash stays in the drawer until you record a <b>Deposit</b>.</div>
+
+  <div class="kg" style="margin-bottom:14px">
+    <div class="kpi" style="border-top-color:#0369a1"><div class="ki">🏦</div><div class="kl">Current Bank Balance</div><div class="kv" style="color:${bal<0?'#dc2626':'#0369a1'}">${fmtAED(bal)}</div><div class="ks">live balance</div></div>
+    <div class="kpi" style="border-top-color:#059669"><div class="ki">⬇</div><div class="kl">Money In${bankFrom||bankTo?' (range)':''}</div><div class="kv" style="color:#059669;font-size:18px">${fmtAED(tIn)}</div><div class="ks">deposits & receipts</div></div>
+    <div class="kpi" style="border-top-color:#dc2626"><div class="ki">⬆</div><div class="kl">Money Out${bankFrom||bankTo?' (range)':''}</div><div class="kv" style="color:#dc2626;font-size:18px">${fmtAED(tOut)}</div><div class="ks">payments & withdrawals</div></div>
+    <div class="kpi" style="border-top-color:#8b5cf6"><div class="ki">🏷️</div><div class="kl">Outstanding Loans</div><div class="kv" style="color:#8b5cf6;font-size:18px">${fmtAED(loansOutstanding())}</div><div class="ks">short + long term</div></div>
+  </div>
+
+  ${canEditBank?`<div class="card" style="margin-bottom:14px"><div class="ch">Record Bank Transaction</div><div class="cb">
+    <div class="frow f3">
+      <div class="fg"><label>Date *</label><input type="date" id="bk-date" value="${TODAY}"/></div>
+      <div class="fg"><label>Direction *</label><select id="bk-dir" onchange="onBankDirChange()"><option value="in">⬇ Money In</option><option value="out">⬆ Money Out</option></select></div>
+      <div class="fg"><label>Amount (AED) *</label><input type="number" id="bk-amount" min="0" step="0.01" placeholder="0.00"/></div>
+    </div>
+    <div class="frow f3">
+      <div class="fg"><label>Category</label><select id="bk-cat">${BANK_IN_CATS.map(c=>`<option>${c}</option>`).join('')}</select></div>
+      <div class="fg"><label>Method</label><select id="bk-method"><option value="transfer">Bank Transfer</option><option value="cheque">Cheque</option><option value="online">Online</option><option value="cash-deposit">Cash Deposit</option></select></div>
+      <div class="fg"><label>Reference</label><input id="bk-ref" placeholder="Cheque no. / transfer ref"/></div>
+    </div>
+    <div class="frow f2">
+      <div class="fg"><label>Party (who)</label><input id="bk-party" placeholder="Name / company"/></div>
+      <div class="fg"><label>Notes</label><input id="bk-notes" placeholder="Optional"/></div>
+    </div>
+    <button class="btn bg bbl" onclick="saveBankTxn()" style="margin-top:8px">${bankEditId?'💾 Update Transaction':'🏦 Record Transaction'}</button>
+    ${bankEditId?`<button class="btn bgh" onclick="bankEditId=null;render()" style="margin-top:8px;margin-left:6px">Cancel</button>`:''}
+    <div id="bk-msg" style="display:none;margin-top:8px;font-size:12px;font-weight:700;text-align:center"></div>
+  </div></div>
+
+  <div class="card" style="margin-bottom:14px"><div class="ch">⚙ Opening Bank Balance</div><div class="cb">
+    <div style="display:flex;gap:8px;align-items:flex-end;flex-wrap:wrap">
+      <div class="fg" style="margin:0;flex:1;min-width:180px"><label>Balance when you started using the system</label><input type="number" id="bk-ob" step="0.01" value="${bankOpeningBal}"/></div>
+      <button class="btn bb bsm" onclick="saveBankOB()">Save Opening Balance</button>
+    </div>
+    <div class="fnote">This is your real bank balance on day one. The system adds/subtracts every transaction from here.</div>
+  </div></div>`:''}
+
+  <div class="card"><div class="ch" style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px"><span>Bank Transactions (${rows.length})</span>
+    <span class="no-print" style="display:flex;gap:6px;align-items:center">
+      <input type="date" id="bk-from" value="${bankFrom}" onchange="bankFrom=this.value;render()" style="width:auto;padding:5px 8px;font-size:11px"/>
+      <input type="date" id="bk-to" value="${bankTo}" onchange="bankTo=this.value;render()" style="width:auto;padding:5px 8px;font-size:11px"/>
+      <button class="btn bb bsm" onclick="exportBankCSV()">📄 CSV</button>
+    </span></div>
+    ${rows.length?`<div class="tw"><table><thead><tr><th>Date</th><th>Direction</th><th>Category</th><th>Method</th><th>Party</th><th>Ref</th><th class="r">Amount</th><th class="r">Balance</th>${canEditBank?'<th></th>':''}</tr></thead><tbody>
+      ${(()=>{
+        // compute running balance oldest→newest, then display newest first
+        const asc=[...rows].sort((a,b)=>(a.date<b.date?-1:a.date>b.date?1:(a.ts||0)-(b.ts||0)));
+        let run=+bankOpeningBal||0;
+        // need running balance including txns before the filtered range
+        const beforeRange=bankTxns.filter(t=>bankFrom&&t.date<bankFrom).reduce((a,t)=>a+(t.direction==='in'?1:-1)*t.amount,0);
+        run+=beforeRange;
+        const withBal=asc.map(t=>{run+=(t.direction==='in'?1:-1)*(+t.amount||0);return{...t,_bal:run};});
+        return withBal.reverse().map(t=>`<tr>
+          <td style="font-size:11px">${fD(t.date)}</td>
+          <td>${t.direction==='in'?'<span class="tag" style="background:#f0fdf4;color:#059669">⬇ IN</span>':'<span class="tag" style="background:#fef2f2;color:#dc2626">⬆ OUT</span>'}</td>
+          <td style="font-size:11px">${esc(t.category||'—')}${t.source!=='manual'?` <span style="font-size:9px;color:var(--muted)">(auto)</span>`:''}</td>
+          <td style="font-size:11px">${esc(t.method||'—')}</td>
+          <td style="font-size:11px">${esc(t.party||'—')}</td>
+          <td style="font-size:11px">${esc(t.ref||'—')}</td>
+          <td class="r b" style="color:${t.direction==='in'?'#059669':'#dc2626'}">${t.direction==='in'?'+':'−'}${fmtAED(t.amount)}</td>
+          <td class="r" style="font-weight:700">${fmtAED(t._bal)}</td>
+          ${canEditBank?`<td>${t.source==='manual'?`<button class="btn br bsm" onclick="delBankTxn('${t.id}')">×</button>`:`<span title="Auto from ${esc(t.source)} — delete the source record to remove" style="color:var(--muted);font-size:10px">🔗</span>`}</td>`:''}
+        </tr>`).join('');
+      })()}
+    </tbody></table></div>`:`<div class="cb" style="text-align:center;color:var(--muted);padding:30px">No bank transactions yet</div>`}
+  </div>`;
+  // set category options based on direction
+  setTimeout(()=>onBankDirChange(),0);
+}
+function onBankDirChange(){
+  const dir=document.getElementById('bk-dir')?.value;const cat=document.getElementById('bk-cat');
+  if(!cat)return;const cats=dir==='in'?BANK_IN_CATS:BANK_OUT_CATS;
+  cat.innerHTML=cats.map(c=>`<option>${c}</option>`).join('');
+}
+async function saveBankOB(){
+  bankOpeningBal=+document.getElementById('bk-ob').value||0;saveBank();
+  if(SB&&!useLocal){try{await syncBankFromSource('opening','opening-bal',null);const t={id:uid(),date:TODAY,direction:'in',amount:bankOpeningBal,category:'Opening Balance',source:'opening',sourceId:'opening-bal',by:currentUser?.name||'',ts:Date.now()};await SB.from('bank_txns').upsert({id:t.id,date:t.date,direction:t.direction,amount:t.amount,category:t.category,source:'opening',source_id:'opening-bal',created_by:t.by,ts:t.ts});}catch(e){console.error(e);}}
+  await logAction('BANK_OPENING_BALANCE',fmtAED(bankOpeningBal));
+  msg('bk-msg','✅ Opening balance saved',true);render();
+}
+async function saveBankTxn(){
+  const date=document.getElementById('bk-date').value;
+  const direction=document.getElementById('bk-dir').value;
+  const amount=+document.getElementById('bk-amount').value;
+  if(!date||!amount||amount<=0){msg('bk-msg','⚠ Enter date and a valid amount',false);return;}
+  const t={id:bankEditId||uid(),date,direction,amount:+amount.toFixed(2),category:document.getElementById('bk-cat').value,method:document.getElementById('bk-method').value,ref:document.getElementById('bk-ref').value.trim(),party:document.getElementById('bk-party').value.trim(),notes:document.getElementById('bk-notes').value.trim(),source:'manual',sourceId:'',by:currentUser?.name||'',ts:Date.now()};
+  if(bankEditId){bankTxns=bankTxns.filter(x=>x.id!==bankEditId);bankEditId=null;}
+  bankTxns.push(t);await dbUpsertBankTxn(t);saveBank();
+  await logAction('BANK_TXN',(direction==='in'?'IN ':'OUT ')+fmtAED(amount)+' — '+t.category);
+  msg('bk-msg','✅ Saved',true);setTimeout(()=>render(),700);
+}
+async function delBankTxn(id){const t=bankTxns.find(x=>x.id===id);if(!t)return;if(!confirm('Delete this bank transaction?'))return;bankTxns=bankTxns.filter(x=>x.id!==id);await dbDelBankTxn(id);saveBank();await logAction('BANK_TXN_DELETED',fmtAED(t.amount)+' — '+t.category);render();}
+function exportBankCSV(){
+  const rows=[...bankTxns].filter(t=>(!bankFrom||t.date>=bankFrom)&&(!bankTo||t.date<=bankTo)).sort((a,b)=>a.date<b.date?-1:1);
+  const h=['Date','Direction','Category','Method','Party','Reference','Amount AED','Source'];
+  const r=rows.map(t=>[t.date,t.direction.toUpperCase(),t.category||'',t.method||'',t.party||'',t.ref||'',t.amount.toFixed(2),t.source||'manual']);
+  dlCSV(h,r,'OMNIA_Bank_'+(bankFrom||'all')+'_to_'+(bankTo||'now'));
+}
+
+// ══════════ LOANS PAGE ══════════
+let loanEditId=null;
+function renderLoans(){
+  const canEditLoan=currentUser&&['admin','accountant','management'].includes(normRole(currentUser.role));
+  const active=loans.filter(l=>l.status==='active');
+  const shortT=loansOutstanding('short'),longT=loansOutstanding('long');
+  document.getElementById('content').innerHTML=`
+  <div class="al al-b no-print" style="margin-bottom:14px">🏷️ <b>Loans</b> — record money the company borrows. When you receive a loan you can add it to the bank automatically. Outstanding balances appear as <b>liabilities</b> in the Balance Sheet (short-term &lt; 1 year, long-term &gt; 1 year).</div>
+
+  <div class="kg" style="margin-bottom:14px">
+    <div class="kpi" style="border-top-color:#f59e0b"><div class="ki">⏳</div><div class="kl">Short-term Loans</div><div class="kv" style="color:#f59e0b;font-size:18px">${fmtAED(shortT)}</div><div class="ks">due within 1 year</div></div>
+    <div class="kpi" style="border-top-color:#8b5cf6"><div class="ki">📅</div><div class="kl">Long-term Loans</div><div class="kv" style="color:#8b5cf6;font-size:18px">${fmtAED(longT)}</div><div class="ks">due after 1 year</div></div>
+    <div class="kpi" style="border-top-color:#dc2626"><div class="ki">Σ</div><div class="kl">Total Outstanding</div><div class="kv" style="color:#dc2626;font-size:18px">${fmtAED(shortT+longT)}</div><div class="ks">total liabilities</div></div>
+  </div>
+
+  ${canEditLoan?`<div class="card" style="margin-bottom:14px"><div class="ch">Record Loan</div><div class="cb">
+    <div class="frow f3">
+      <div class="fg"><label>Date *</label><input type="date" id="ln-date" value="${TODAY}"/></div>
+      <div class="fg"><label>Type *</label><select id="ln-type"><option value="short">Short-term (&lt; 1 year)</option><option value="long">Long-term (&gt; 1 year)</option></select></div>
+      <div class="fg"><label>Principal (AED) *</label><input type="number" id="ln-principal" min="0" step="0.01" placeholder="0.00"/></div>
+    </div>
+    <div class="frow f2">
+      <div class="fg"><label>Lender</label><input id="ln-lender" placeholder="Bank / person / institution"/></div>
+      <div class="fg"><label>Notes</label><input id="ln-notes" placeholder="Terms, interest, etc."/></div>
+    </div>
+    <label style="display:flex;align-items:center;gap:8px;margin:10px 0;font-size:12px;font-weight:600;cursor:pointer"><input type="checkbox" id="ln-tobank" checked style="width:16px;height:16px"/> Add this amount to the bank account (money received)</label>
+    <button class="btn bg bbl" onclick="saveLoan()">${loanEditId?'💾 Update Loan':'🏷️ Record Loan'}</button>
+    ${loanEditId?`<button class="btn bgh" onclick="loanEditId=null;render()" style="margin-left:6px">Cancel</button>`:''}
+    <div id="ln-msg" style="display:none;margin-top:8px;font-size:12px;font-weight:700;text-align:center"></div>
+  </div></div>`:''}
+
+  <div class="card"><div class="ch">Loans (${loans.length})</div>
+    ${loans.length?`<div class="tw"><table><thead><tr><th>Date</th><th>Lender</th><th>Type</th><th class="r">Principal</th><th class="r">Outstanding</th><th>Status</th>${canEditLoan?'<th></th>':''}</tr></thead><tbody>
+      ${[...loans].sort((a,b)=>b.date<a.date?-1:1).map(l=>`<tr>
+        <td style="font-size:11px">${fD(l.date)}</td>
+        <td style="font-weight:600">${esc(l.lender||'—')}</td>
+        <td>${l.type==='short'?'<span class="tag" style="background:#fffbeb;color:#92400e">Short-term</span>':'<span class="tag" style="background:#faf5ff;color:#7c3aed">Long-term</span>'}</td>
+        <td class="r">${fmtAED(l.principal)}</td>
+        <td class="r b" style="color:${l.outstanding>0?'#dc2626':'#059669'}">${fmtAED(l.outstanding)}</td>
+        <td>${l.status==='active'?'<span class="tag" style="background:#fef2f2;color:#dc2626">Active</span>':'<span class="tag" style="background:#f0fdf4;color:#059669">Settled</span>'}</td>
+        ${canEditLoan?`<td style="white-space:nowrap">
+          ${l.status==='active'?`<button class="btn bg bsm" onclick="repayLoan('${l.id}')" title="Record repayment">💵</button>`:''}
+          <button class="btn br bsm" onclick="delLoan('${l.id}')">×</button>
+        </td>`:''}
+      </tr>`).join('')}
+    </tbody></table></div>`:`<div class="cb" style="text-align:center;color:var(--muted);padding:30px">No loans recorded</div>`}
+  </div>`;
+}
+async function saveLoan(){
+  const date=document.getElementById('ln-date').value;
+  const principal=+document.getElementById('ln-principal').value;
+  if(!date||!principal||principal<=0){msg('ln-msg','⚠ Enter date and a valid principal',false);return;}
+  const type=document.getElementById('ln-type').value;
+  const lender=document.getElementById('ln-lender').value.trim();
+  const toBank=document.getElementById('ln-tobank')?.checked;
+  const l={id:uid(),date,lender,type,principal:+principal.toFixed(2),outstanding:+principal.toFixed(2),notes:document.getElementById('ln-notes').value.trim(),status:'active',by:currentUser?.name||'',ts:Date.now()};
+  loans.push(l);await dbUpsertLoan(l);saveLoans();
+  // add to bank if received
+  if(toBank){await syncBankFromSource('loan',l.id,{date:l.date,direction:'in',amount:l.principal,category:'Loan Received',method:'transfer',ref:'',party:lender,notes:(type==='short'?'Short':'Long')+'-term loan'});}
+  await logAction('LOAN_RECORDED',(type==='short'?'Short':'Long')+'-term '+fmtAED(principal)+(lender?' from '+lender:''));
+  msg('ln-msg','✅ Loan recorded'+(toBank?' and added to bank':''),true);setTimeout(()=>render(),800);
+}
+async function repayLoan(id){
+  const l=loans.find(x=>x.id===id);if(!l)return;
+  const amtStr=prompt('Repayment amount (AED)?\nOutstanding: '+fmtAED(l.outstanding)+'\n\nThis will be deducted from the bank account.');
+  if(amtStr===null)return;
+  const amt=+amtStr;if(!amt||amt<=0){alert('Enter a valid amount');return;}
+  const pay=Math.min(amt,l.outstanding);
+  l.outstanding=+(l.outstanding-pay).toFixed(2);
+  if(l.outstanding<=0.009){l.outstanding=0;l.status='settled';}
+  await dbUpsertLoan(l);saveLoans();
+  // deduct repayment from bank
+  await syncBankFromSource('loan-repay',l.id+'-'+Date.now(),{date:TODAY,direction:'out',amount:pay,category:'Loan Repayment',method:'transfer',ref:'',party:l.lender,notes:'Repayment'});
+  await logAction('LOAN_REPAYMENT',fmtAED(pay)+' — '+(l.lender||'loan')+(l.status==='settled'?' [SETTLED]':''));
+  render();
+}
+async function delLoan(id){const l=loans.find(x=>x.id===id);if(!l)return;if(!confirm('Delete this loan? Any linked bank entries stay unless removed manually.'))return;loans=loans.filter(x=>x.id!==id);await dbDelLoan(id);saveLoans();await syncBankFromSource('loan',id,null);await logAction('LOAN_DELETED',fmtAED(l.principal));render();}
+
 function cashThisMonth(){const d=new Date();cashFrom=new Date(d.getFullYear(),d.getMonth(),1).toISOString().split('T')[0];cashTo=new Date(d.getFullYear(),d.getMonth()+1,0).toISOString().split('T')[0];render();}
 function cashLastMonth(){const d=new Date();cashFrom=new Date(d.getFullYear(),d.getMonth()-1,1).toISOString().split('T')[0];cashTo=new Date(d.getFullYear(),d.getMonth(),0).toISOString().split('T')[0];render();}
+// Total collected cash currently on hand (cash receipts − cash already moved to petty as deposits)
+function cashOnHandAvailable(){
+  const cashReceipts=(typeof payments!=='undefined'?payments:[]).filter(p=>!p.cancelled&&isApprovedRec(p)&&(p.method||'').toLowerCase()==='cash').reduce((a,p)=>a+(+p.amount||0),0);
+  // cash deposited into petty (top-ups sourced from collected cash)
+  const movedToPetty=(typeof pettyCash!=='undefined'?pettyCash:[]).filter(e=>e.type==='in'&&e.fromCash).reduce((a,e)=>a+(+e.amount||0),0);
+  // cash deposited to bank
+  const movedToBank=(typeof bankTxns!=='undefined'?bankTxns:[]).filter(t=>t.method==='cash-deposit').reduce((a,t)=>a+(+t.amount||0),0);
+  return +(cashReceipts-movedToPetty-movedToBank).toFixed(2);
+}
+function onPettyTypeChange(){
+  const type=document.getElementById('pc-type')?.value;
+  const row=document.getElementById('pc-source-row');
+  if(row)row.style.display=type==='in'?'block':'none';
+}
+function onPettyCashSrc(){
+  const src=document.getElementById('pc-cashsrc')?.value;
+  const avail=cashOnHandAvailable();
+  const info=document.getElementById('pc-cash-info');
+  const amtEl=document.getElementById('pc-amount');
+  if(!info)return;
+  if(src==='__ALL__'){
+    if(amtEl)amtEl.value=avail>0?avail.toFixed(2):'0';
+    info.innerHTML=`Collected cash on hand: <b>${fmtAED(avail)}</b> → will all move to petty cash. Remaining cash: <b>${fmtAED(0)}</b>`;
+  }else if(src==='__CUSTOM__'){
+    const entered=+amtEl?.value||0;
+    info.innerHTML=`Collected cash on hand: <b>${fmtAED(avail)}</b> · Taking: <b>${fmtAED(entered)}</b> · Remaining: <b>${fmtAED(Math.max(0,avail-entered))}</b>`;
+  }else{
+    info.innerHTML='';
+  }
+}
 async function savePetty2(){
   const type=document.getElementById('pc-type').value;
   const date=document.getElementById('pc-date').value;
   const amount=+document.getElementById('pc-amount').value;
   if(!date){msg('pc-msg','⚠ Select date',false);return;}
   if(!amount||amount<=0){msg('pc-msg','⚠ Enter a valid amount',false);return;}
-  const e={id:uid(),date,type,amount:+amount.toFixed(2),category:document.getElementById('pc-cat').value,desc:document.getElementById('pc-desc').value.trim(),by:currentUser?.name||'',status:needsFinApproval()?'pending':'approved',ts:Date.now()};
+  const cashSrc=type==='in'?(document.getElementById('pc-cashsrc')?.value||''):'';
+  const fromCash=!!cashSrc;
+  if(fromCash){
+    const avail=cashOnHandAvailable();
+    if(amount>avail+0.01){msg('pc-msg',`⚠ Only ${fmtAED(avail)} collected cash available. Reduce the amount.`,false);return;}
+  }
+  const e={id:uid(),date,type,amount:+amount.toFixed(2),category:document.getElementById('pc-cat').value,desc:document.getElementById('pc-desc').value.trim(),fromCash,by:currentUser?.name||'',status:needsFinApproval()?'pending':'approved',ts:Date.now()};
   pettyCash.push(e);await dbInsertPetty(e);savePetty();
-  await logAction('PETTY_CASH_'+(type==='in'?'IN':'OUT'),fmtAED(amount)+' — '+e.category+(e.desc?' ('+e.desc+')':'')+(e.status==='pending'?' [PENDING APPROVAL]':''));
+  await logAction('PETTY_CASH_'+(type==='in'?'IN':'OUT'),fmtAED(amount)+' — '+e.category+(fromCash?' (from collected cash)':'')+(e.desc?' ('+e.desc+')':'')+(e.status==='pending'?' [PENDING APPROVAL]':''));
   if(e.status==='pending'){await createFinApproval('petty',e.id,'Petty '+(type==='in'?'In':'Out')+' '+e.category+' '+fmtAED(amount),amount);msg('pc-msg','✅ Submitted — pending management approval before it counts in reports.',true);}
-  else msg('pc-msg','✅ Saved!',true);
+  else msg('pc-msg','✅ Saved!'+(fromCash?' Moved from collected cash.':''),true);
   setTimeout(()=>render(),900);
 }
 async function delPetty(id){const e=pettyCash.find(x=>x.id===id);if(!e)return;if(!confirm('Delete this petty cash entry?'))return;pettyCash=pettyCash.filter(x=>x.id!==id);await dbDeletePetty(id);savePetty();await logAction('PETTY_CASH_DELETED',fmtAED(e.amount)+' — '+e.category);render();}
@@ -5581,8 +5823,12 @@ async function saveSupPay2(){
   const sup=suppliers.find(s=>s.id===supId);
   const p={id:uid(),date:document.getElementById('sp-date').value,supplierId:supId,supplierName:sup?.name||'',amount:+amount.toFixed(2),currency:document.getElementById('sp-cur').value,fxRate:fx,amountAED:+(amount*fx).toFixed(2),method:document.getElementById('sp-method').value,ref:document.getElementById('sp-ref').value.trim(),poNo:document.getElementById('sp-po').value,notes:'',by:currentUser?.name||'',ts:Date.now()};
   supPayments.push(p);await dbInsertSupPay(p);saveSupPay();
-  await logAction('SUPPLIER_PAYMENT',p.supplierName+' — '+p.currency+' '+amount.toFixed(2)+' ('+fmtAED(p.amountAED)+')');
-  msg('sp-msg','✅ Payment recorded!',true);
+  // auto-deduct from bank if paid by a bank method (transfer/cheque/online)
+  if(isBankMethod(p.method)){
+    await syncBankFromSource('supplier',p.id,{date:p.date,direction:'out',amount:p.amountAED,category:'Supplier Payment',method:p.method,ref:p.ref||p.poNo||'',party:p.supplierName,notes:'Payment to '+p.supplierName+(p.poNo?' ('+p.poNo+')':'')});
+  }
+  await logAction('SUPPLIER_PAYMENT',p.supplierName+' — '+p.currency+' '+amount.toFixed(2)+' ('+fmtAED(p.amountAED)+')'+(isBankMethod(p.method)?' [→ Bank]':''));
+  msg('sp-msg','✅ Payment recorded!'+(isBankMethod(p.method)?' Deducted from bank.':''),true);
   setTimeout(()=>render(),700);
 }
 async function delSupPay(id){const p=supPayments.find(x=>x.id===id);if(!p)return;if(!confirm('Delete this supplier payment?'))return;supPayments=supPayments.filter(x=>x.id!==id);await dbDelSupPay(id);saveSupPay();await logAction('SUPPLIER_PAYMENT_DELETED',p.supplierName+' '+fmtAED(p.amountAED));render();}
@@ -5647,11 +5893,14 @@ function renderFinStatements(){
   const receivables=customers.reduce((a,c)=>{const b=custBalance(c.name);return a+(b.balance>0?b.balance:0);},0);
   const cashCollected=pays.reduce((a,p)=>a+p.amount,0);
   const pettyOnHand=(typeof pettyCash!=='undefined'?pettyCash:[]).reduce((a,e)=>a+(e.type==='in'?e.amount:-e.amount),0);
+  const bankBal=(typeof bankBalance==='function')?bankBalance(finTo):0;
   // Liabilities
   const payables=(typeof suppliers!=='undefined'?suppliers:[]).reduce((a,s)=>{const b=supplierBalance(s.id);return a+(b.balance>0?b.balance:0);},0);
+  const shortLoans=(typeof loansOutstanding==='function')?loansOutstanding('short'):0;
+  const longLoans=(typeof loansOutstanding==='function')?loansOutstanding('long'):0;
   const fixedAssets=(typeof totalAssetsBookValue==='function')?totalAssetsBookValue(finTo):0;
-  const totalAssets=stockValue+receivables+pettyOnHand+fixedAssets;
-  const totalLiab=payables;
+  const totalAssets=stockValue+receivables+pettyOnHand+bankBal+fixedAssets;
+  const totalLiab=payables+shortLoans+longLoans;
   const equity=totalAssets-totalLiab;
 
   const tab=(k,lbl,icon)=>`<button class="btn bsm" style="background:${finTab===k?'var(--g)':'#fff'};color:${finTab===k?'#fff':'var(--ink)'};border:1px solid var(--border)" onclick="finTab='${k}';render()">${icon} ${lbl}</button>`;
@@ -5662,6 +5911,7 @@ function renderFinStatements(){
     body=`<div class="al al-b" style="margin-bottom:14px">📊 <b>Balance Sheet (snapshot as of ${fD(finTo)}).</b> A simplified statement of what the business owns (assets) and owes (liabilities). Inventory is valued at cost. Confirm with your accountant for official statements.</div>
     <div class="card"><div class="ch">🏦 Balance Sheet</div><div class="tw"><table><tbody>
       ${row('ASSETS','',{head:true,bg:'#f0fdf4',color:'#166534',noval:true})}
+      ${row('Bank Account',bankBal,{indent:true})}
       ${row('Inventory (at cost)',stockValue,{indent:true})}
       ${row('Accounts Receivable (customers owe)',receivables,{indent:true})}
       ${row('Petty Cash on Hand',pettyOnHand,{indent:true})}
@@ -5669,6 +5919,8 @@ function renderFinStatements(){
       ${row('Total Assets',totalAssets,{bold:true,bg:'#f8fafc',head:false})}
       ${row('LIABILITIES','',{head:true,bg:'#fef2f2',color:'#991b1b',noval:true})}
       ${row('Accounts Payable (we owe suppliers)',payables,{indent:true})}
+      ${shortLoans>0?row('Short-term Loans',shortLoans,{indent:true}):''}
+      ${longLoans>0?row('Long-term Loans',longLoans,{indent:true}):''}
       ${row('Total Liabilities',totalLiab,{bold:true,bg:'#f8fafc'})}
       ${row('EQUITY','',{head:true,bg:'#eff6ff',color:'#1e40af',noval:true})}
       <tr style="background:#0c1a27"><td style="font-weight:800;color:#fff">Net Equity (Assets − Liabilities)</td><td class="r" style="font-weight:800;color:#6ee7b7;font-size:15px">${fmtAED(equity)}</td></tr>
@@ -5845,6 +6097,61 @@ function exportExpensesCSV(){
 
 
 // ══════════ FIXED ASSETS & DEPRECIATION ══════════
+// ══════════ BANK ACCOUNT & LOANS ══════════
+let bankTxns=[]; // {id,date,direction:'in'|'out',amount,category,method,ref,party,notes,source,sourceId,by,ts}
+let loans=[];    // {id,date,lender,type:'short'|'long',principal,outstanding,notes,status,by,ts}
+let bankOpeningBal=0; // opening bank balance (editable by admin/accountant)
+const BANK_IN_CATS=['Customer Receipt','Cash Deposit','Loan Received','Owner Capital','Refund','Other Income'];
+const BANK_OUT_CATS=['Supplier Payment','Salary','Rent','Utilities','Loan Repayment','Bank Charges','Cash Withdrawal','Tax Payment','Other Expense'];
+// Payment methods that go straight to the bank (cash stays in drawer until deposited)
+function isBankMethod(m){return ['transfer','cheque','online','card','bank'].includes((m||'').toLowerCase());}
+function saveBank(){if(typeof DEMO_MODE!=='undefined'&&DEMO_MODE){demoSave();return;}localStorage.setItem('wms_bank',JSON.stringify(bankTxns));localStorage.setItem('wms_bank_ob',String(bankOpeningBal));}
+function loadBank(){bankTxns=JSON.parse(localStorage.getItem('wms_bank')||'[]');bankOpeningBal=+(localStorage.getItem('wms_bank_ob')||0);}
+function saveLoans(){if(typeof DEMO_MODE!=='undefined'&&DEMO_MODE){demoSave();return;}localStorage.setItem('wms_loans',JSON.stringify(loans));}
+function loadLoans(){loans=JSON.parse(localStorage.getItem('wms_loans')||'[]');}
+async function dbUpsertBankTxn(t){if(!SB||useLocal){saveBank();return;}const{error}=await SB.from('bank_txns').upsert({id:t.id,date:t.date,direction:t.direction,amount:t.amount,category:t.category||null,method:t.method||null,ref:t.ref||null,party:t.party||null,notes:t.notes||null,source:t.source||'manual',source_id:t.sourceId||null,created_by:t.by||null,ts:t.ts});if(error){console.error('bank upsert:',error);alert('⚠ Could not save bank transaction: '+error.message+'\\nMake sure bank_loans_setup.sql has been run.');}}
+async function dbDelBankTxn(id){if(!SB||useLocal){saveBank();return;}await SB.from('bank_txns').delete().eq('id',id);}
+async function dbDelBankBySource(source,sourceId){if(!SB||useLocal){return;}await SB.from('bank_txns').delete().eq('source',source).eq('source_id',sourceId);}
+async function loadBankFromDB(){
+  if(!SB)return;
+  try{const{data}=await SB.from('bank_txns').select('*').order('date',{ascending:true});
+    bankTxns=(data||[]).map(r=>({id:r.id,date:r.date,direction:r.direction,amount:+r.amount||0,category:r.category||'',method:r.method||'',ref:r.ref||'',party:r.party||'',notes:r.notes||'',source:r.source||'manual',sourceId:r.source_id||'',by:r.created_by||'',ts:r.ts||0}));
+    // opening balance lives in a special bank_txn with source='opening'
+    const ob=bankTxns.find(t=>t.source==='opening');
+    if(ob){bankOpeningBal=ob.amount;bankTxns=bankTxns.filter(t=>t.source!=='opening');}
+  }catch(e){console.error('bank load:',e);}
+}
+async function dbUpsertLoan(l){if(!SB||useLocal){saveLoans();return;}const{error}=await SB.from('loans').upsert({id:l.id,date:l.date,lender:l.lender||null,type:l.type,principal:l.principal,outstanding:l.outstanding,notes:l.notes||null,status:l.status||'active',created_by:l.by||null,ts:l.ts});if(error){console.error('loan upsert:',error);alert('⚠ Could not save loan: '+error.message+'\\nMake sure bank_loans_setup.sql has been run.');}}
+async function dbDelLoan(id){if(!SB||useLocal){saveLoans();return;}await SB.from('loans').delete().eq('id',id);}
+async function loadLoansFromDB(){
+  if(!SB)return;
+  try{const{data}=await SB.from('loans').select('*').order('date',{ascending:false});
+    loans=(data||[]).map(r=>({id:r.id,date:r.date,lender:r.lender||'',type:r.type||'short',principal:+r.principal||0,outstanding:+r.outstanding||0,notes:r.notes||'',status:r.status||'active',by:r.created_by||'',ts:r.ts||0}));
+  }catch(e){console.error('loans load:',e);}
+}
+// ── Bank balance calculations ──
+function bankBalance(asOf){
+  let bal=+bankOpeningBal||0;
+  bankTxns.forEach(t=>{
+    if(asOf&&t.date>asOf)return;
+    bal+=(t.direction==='in'?1:-1)*(+t.amount||0);
+  });
+  return +bal.toFixed(2);
+}
+function bankInTotal(from,to){return bankTxns.filter(t=>t.direction==='in'&&(!from||t.date>=from)&&(!to||t.date<=to)).reduce((a,t)=>a+(+t.amount||0),0);}
+function bankOutTotal(from,to){return bankTxns.filter(t=>t.direction==='out'&&(!from||t.date>=from)&&(!to||t.date<=to)).reduce((a,t)=>a+(+t.amount||0),0);}
+// Total outstanding loans by type (for Balance Sheet liabilities)
+function loansOutstanding(type){return loans.filter(l=>l.status==='active'&&(!type||l.type===type)).reduce((a,l)=>a+(+l.outstanding||0),0);}
+// Auto-create/update a bank transaction from a linked record (payment/supplier/expense)
+async function syncBankFromSource(source,sourceId,data){
+  // remove any existing bank txn for this source first
+  const existing=bankTxns.find(t=>t.source===source&&t.sourceId===sourceId);
+  if(existing){bankTxns=bankTxns.filter(t=>!(t.source===source&&t.sourceId===sourceId));await dbDelBankBySource(source,sourceId);}
+  if(!data)return; // null = just remove (e.g. payment deleted or method changed to cash)
+  const t={id:uid(),...data,source,sourceId,by:currentUser?.name||'',ts:Date.now()};
+  bankTxns.push(t);await dbUpsertBankTxn(t);saveBank();
+}
+
 let assets=[]; // {id,name,category,purchaseDate,cost,usefulLife,salvage,method,notes,by,ts,disposed,disposalDate}
 let assetEditId=null;
 const ASSET_CATS=['Vehicles','Equipment','Furniture','Computers/IT','Machinery','Office Fit-out','Other'];
@@ -6137,7 +6444,7 @@ document.addEventListener('DOMContentLoaded',()=>{injectLogos();startClock();sta
         if(savedUser&&savedUser.email!=='offline'){
           currentUser=savedUser;
           updateUserUI();
-          await loadFromDB();await loadSalesFromDB();await loadReturnsFromDB();await loadDNFromDB();await loadApprovalsFromDB();await loadPaymentsFromDB();await loadPettyFromDB();await loadSupFromDB();await loadSupPayFromDB();await loadExpFromDB();await loadAssetsFromDB();await loadRoleOverridesFromDB();subscribeRealtime();go('dashboard');
+          await loadFromDB();await loadSalesFromDB();await loadReturnsFromDB();await loadDNFromDB();await loadApprovalsFromDB();await loadPaymentsFromDB();await loadPettyFromDB();await loadSupFromDB();await loadSupPayFromDB();await loadExpFromDB();await loadAssetsFromDB();await loadRoleOverridesFromDB();await loadBankFromDB();await loadLoansFromDB();subscribeRealtime();go('dashboard');
           return;
         }
       }
