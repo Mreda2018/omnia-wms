@@ -1364,38 +1364,36 @@ function renderDashboard(){
 }
 
 // ── STOCK IN FORM ────────────────────────────────
-let inLines=[{cases:0,pcs:0,batch:'',expiry:''}];
-function snapIn(){const g=id=>document.getElementById(id)?.value;return{date:g('fi-date'),loc:g('fi-loc'),sku:g('fi-sku'),party:g('fi-party'),ref:g('fi-ref'),notes:g('fi-notes')};}
-function restIn(v){if(!v)return;const s=(id,val)=>{const el=document.getElementById(id);if(el&&val!=null&&val!=='')el.value=val;};s('fi-date',v.date);s('fi-loc',v.loc);s('fi-sku',v.sku);s('fi-party',v.party);s('fi-ref',v.ref);s('fi-notes',v.notes);if(v.sku)onSkuChange('fi');}
-function reIn(){const v=snapIn();renderIn();restIn(v);}
-function addInLine(){inLines.push({cases:0,pcs:0,batch:'',expiry:''});reIn();}
-function delInLine(i){inLines.splice(i,1);if(!inLines.length)inLines=[{cases:0,pcs:0,batch:'',expiry:''}];reIn();}
-function updInLine(i,field,val){inLines[i][field]=(field==='cases'||field==='pcs')?(parseInt(val)||0):val;}
+let inLines=[{sku:'',cases:0,pcs:0,batch:'',expiry:''}];
+function snapIn(){const g=id=>document.getElementById(id)?.value;return{date:g('fi-date'),loc:g('fi-loc'),party:g('fi-party'),ref:g('fi-ref'),notes:g('fi-notes')};}
+function restIn(v){if(!v)return;const s=(id,val)=>{const el=document.getElementById(id);if(el&&val!=null&&val!=='')el.value=val;};s('fi-date',v.date);s('fi-loc',v.loc);s('fi-party',v.party);s('fi-ref',v.ref);s('fi-notes',v.notes);}
+function reIn(){const v=snapIn();captureInLines();renderIn();restIn(v);}
+function captureInLines(){const rows=document.querySelectorAll('.fi-line-row');if(!rows.length)return;inLines=Array.from(rows).map(r=>({sku:r.querySelector('.fi-sku-sel')?.value||'',cases:parseInt(r.querySelector('.fi-cases')?.value)||0,pcs:parseInt(r.querySelector('.fi-pcs')?.value)||0,batch:r.querySelector('.fi-batch')?.value||'',expiry:r.querySelector('.fi-expiry')?.value||''}));}
+function addInLine(){captureInLines();inLines.push({sku:'',cases:0,pcs:0,batch:'',expiry:''});const v=snapIn();renderIn();restIn(v);}
+function delInLine(i){captureInLines();inLines.splice(i,1);if(!inLines.length)inLines=[{sku:'',cases:0,pcs:0,batch:'',expiry:''}];const v=snapIn();renderIn();restIn(v);}
+function updInLine(i,field,val){if(!inLines[i])return;inLines[i][field]=(field==='cases'||field==='pcs')?(parseInt(val)||0):val;}
 function renderIn(){
   const recent=movements.filter(m=>m.type==='IN').slice(-8).reverse();
-  const ppc=(()=>{const sku=document.getElementById('fi-sku')?.value;return sku?getPPC(sku):1;})();
   document.getElementById('content').innerHTML=`
   <div class="two-col">
-  ${canEdit()?`<div class="card"><div class="ch" style="background:#f0fdf4;border-bottom-color:#bbf7d0;color:#065f46">📥 Record Stock In <span style="font-size:10px;font-weight:600;color:#b45309">— add multiple expiry dates for the same product</span></div><div class="cb">
+  ${canEdit()?`<div class="card"><div class="ch" style="background:#f0fdf4;border-bottom-color:#bbf7d0;color:#065f46">📥 Record Stock In <span style="font-size:10px;font-weight:600;color:#b45309">— add multiple products, each with its own expiry</span></div><div class="cb">
     <div class="frow f2">
       <div class="fg"><label>Date *</label><input type="date" id="fi-date" value="${TODAY}"/></div>
       <div class="fg"><label>Location *</label><select id="fi-loc"><option value="">Select...</option>${locs.map(l=>`<option value="${l.id}">${l.icon} ${esc(l.name)}</option>`).join('')}</select></div>
     </div>
-    <div class="fg"><label>Product / SKU *</label><select id="fi-sku" onchange="reIn()"><option value="">Select product...</option>${products.map(p=>`<option value="${p.sku}">${esc(p.sku)} — ${esc(p.name)}</option>`).join('')}</select></div>
-    <div id="fi-info" style="display:none;background:var(--gl);border-radius:8px;padding:8px 12px;margin-bottom:10px;font-size:11px;color:var(--gd);font-weight:700"></div>
     <div style="background:#fff7ed;border:1.5px solid #f59e0b;border-radius:10px;padding:12px 14px;margin-bottom:10px">
-      <div style="font-size:10px;font-weight:800;color:#92400e;letter-spacing:.5px;margin-bottom:8px">📦 BATCHES & EXPIRY — each line is a separate batch with its own expiry date</div>
-      <div class="tw"><table style="width:100%;font-size:12px"><thead><tr style="background:#fffbeb"><th style="padding:5px;text-align:left;font-size:10px">Cases</th><th style="padding:5px;text-align:left;font-size:10px">Pieces</th><th style="padding:5px;text-align:left;font-size:10px">Batch No.</th><th style="padding:5px;text-align:left;font-size:10px;color:#c2410c">Expiry ★</th><th style="padding:5px;text-align:right;font-size:10px">Total</th><th></th></tr></thead><tbody>
-        ${inLines.map((ln,i)=>{const tot=ln.cases*ppc+ln.pcs;return`<tr>
-          <td style="padding:3px"><input type="number" min="0" value="${ln.cases}" oninput="updInLine(${i},'cases',this.value);document.getElementById('il-tot-${i}').textContent=((parseInt(this.value)||0)*${ppc}+${ln.pcs}).toLocaleString()" style="width:65px;padding:6px"/></td>
-          <td style="padding:3px"><input type="number" min="0" value="${ln.pcs}" oninput="updInLine(${i},'pcs',this.value);document.getElementById('il-tot-${i}').textContent=(${ln.cases}*${ppc}+(parseInt(this.value)||0)).toLocaleString()" style="width:65px;padding:6px"/></td>
-          <td style="padding:3px"><input value="${esc(ln.batch)}" oninput="updInLine(${i},'batch',this.value)" placeholder="LOT-A" style="width:90px;padding:6px"/></td>
-          <td style="padding:3px"><input type="date" value="${ln.expiry}" oninput="updInLine(${i},'expiry',this.value)" style="width:140px;padding:6px;border-color:#f59e0b;background:#fffbeb"/></td>
-          <td style="padding:3px;text-align:right;font-weight:700"><span id="il-tot-${i}">${tot.toLocaleString()}</span></td>
+      <div style="font-size:10px;font-weight:800;color:#92400e;letter-spacing:.5px;margin-bottom:8px">📦 PRODUCTS & BATCHES — each line is a product with its own quantity & expiry</div>
+      <div class="tw"><table style="width:100%;font-size:12px"><thead><tr style="background:#fffbeb"><th style="padding:5px;text-align:left;font-size:10px;min-width:160px">Product ★</th><th style="padding:5px;text-align:left;font-size:10px">Cases</th><th style="padding:5px;text-align:left;font-size:10px">Pieces</th><th style="padding:5px;text-align:left;font-size:10px">Batch</th><th style="padding:5px;text-align:left;font-size:10px;color:#c2410c">Expiry ★</th><th></th></tr></thead><tbody>
+        ${inLines.map((ln,i)=>`<tr class="fi-line-row">
+          <td style="padding:3px"><select class="fi-sku-sel" onchange="updInLine(${i},'sku',this.value)" style="width:170px;padding:6px;font-size:11px"><option value="">Select...</option>${products.map(p=>`<option value="${esc(p.sku)}" ${ln.sku===p.sku?'selected':''}>${esc(p.sku)} — ${esc(p.name)}</option>`).join('')}</select></td>
+          <td style="padding:3px"><input type="number" min="0" class="fi-cases" value="${ln.cases}" oninput="updInLine(${i},'cases',this.value)" style="width:60px;padding:6px"/></td>
+          <td style="padding:3px"><input type="number" min="0" class="fi-pcs" value="${ln.pcs}" oninput="updInLine(${i},'pcs',this.value)" style="width:60px;padding:6px"/></td>
+          <td style="padding:3px"><input class="fi-batch" value="${esc(ln.batch)}" oninput="updInLine(${i},'batch',this.value)" placeholder="LOT-A" style="width:80px;padding:6px"/></td>
+          <td style="padding:3px"><input type="date" class="fi-expiry" value="${ln.expiry}" oninput="updInLine(${i},'expiry',this.value)" style="width:135px;padding:6px;border-color:#f59e0b;background:#fffbeb"/></td>
           <td style="padding:3px">${inLines.length>1?`<button class="btn br bsm" onclick="delInLine(${i})" style="padding:2px 7px">×</button>`:''}</td>
-        </tr>`;}).join('')}
+        </tr>`).join('')}
       </tbody></table></div>
-      <button class="btn bgh bsm" onclick="addInLine()" style="margin-top:8px">+ Add another batch/expiry line</button>
+      <button class="btn bgh bsm" onclick="addInLine()" style="margin-top:8px">+ Add another product line</button>
     </div>
     <div class="frow f2">
       <div class="fg"><label>Supplier</label><input id="fi-party" placeholder="Supplier name"/></div>
@@ -1417,25 +1415,27 @@ function renderIn(){
       </tr>`;}).join('')}
     </tbody></table></div>`:`<div class="cb" style="text-align:center;color:var(--muted);padding:30px">No entries yet</div>`}
   </div></div>`;
-  if(document.getElementById('fi-sku')){const v=document.getElementById('fi-sku').value;if(v)onSkuChange('fi');}
 }
 async function saveStockInMulti(){
   const date=document.getElementById('fi-date').value;
   const locId=document.getElementById('fi-loc').value;
-  const sku=document.getElementById('fi-sku').value;
   const party=document.getElementById('fi-party').value.trim();
   const ref=document.getElementById('fi-ref').value.trim();
   const notes=document.getElementById('fi-notes').value.trim();
-  if(!date||!locId||!sku){msg('fi-msg','⚠ Fill Date, Location and Product',false);return;}
-  const valid=inLines.filter(ln=>(ln.cases||0)>0||(ln.pcs||0)>0);
-  if(!valid.length){msg('fi-msg','⚠ Enter at least one batch with a quantity',false);return;}
+  if(!date||!locId){msg('fi-msg','⚠ Fill Date and Location',false);return;}
+  captureInLines();
+  const valid=inLines.filter(ln=>ln.sku&&((ln.cases||0)>0||(ln.pcs||0)>0));
+  if(!valid.length){msg('fi-msg','⚠ Add at least one product with a quantity',false);return;}
+  let totalPcs=0;
   for(const ln of valid){
-    await insertMov({id:uid(),date,locId,sku,type:'IN',cases:ln.cases||0,pcs:ln.pcs||0,batch:ln.batch||'',expiry:ln.expiry||'',party,ref,notes,createdBy:currentUser?.name||'',ts:Date.now()});
+    await insertMov({id:uid(),date,locId,sku:ln.sku,type:'IN',cases:ln.cases||0,pcs:ln.pcs||0,batch:ln.batch||'',expiry:ln.expiry||'',party,ref,notes,createdBy:currentUser?.name||'',ts:Date.now()});
+    totalPcs+=ln.cases*getPPC(ln.sku)+ln.pcs;
   }
-  await logAction('STOCK_IN',sku+' — '+valid.length+' batch line'+(valid.length>1?'s':'')+' at '+locId+' ('+valid.reduce((a,l)=>a+(l.cases*getPPC(sku)+l.pcs),0)+' pcs)');
-  msg('fi-msg','✅ Saved '+valid.length+' batch line'+(valid.length>1?'s':'')+'!',true);
-  inLines=[{cases:0,pcs:0,batch:'',expiry:''}];
-  setTimeout(()=>render(),800);
+  const uniqueProducts=new Set(valid.map(l=>l.sku)).size;
+  await logAction('STOCK_IN',valid.length+' line(s), '+uniqueProducts+' product(s) at '+locId+' ('+totalPcs+' pcs total)');
+  msg('fi-msg','✅ Saved '+valid.length+' line'+(valid.length>1?'s':'')+' ('+uniqueProducts+' product'+(uniqueProducts>1?'s':'')+')!',true);
+  inLines=[{sku:'',cases:0,pcs:0,batch:'',expiry:''}];
+  setTimeout(()=>render(),900);
 }
 
 // ── STOCK OUT ────────────────────────────────────
@@ -1613,30 +1613,25 @@ async function saveMultiOut(){
 }
 
 // ── TRANSFER ─────────────────────────────────────
+// ── TRANSFER (multi-product) ──
+let tfLines=[{sku:'',pick:'__FEFO__',cases:0,pcs:0}]; // each line: product + batch pick + qty
 function renderTransfer(){
   const recent=movements.filter(m=>m.type==='TF').slice(-6).reverse();
   document.getElementById('content').innerHTML=`
   <div class="two-col">
-  ${canEdit()?`<div class="card"><div class="ch" style="background:#eff6ff;border-bottom-color:#bfdbfe;color:#1e40af">🔄 Transfer Between Locations</div><div class="cb">
-    <div class="frow f2">
+  ${canEdit()?`<div class="card"><div class="ch" style="background:#eff6ff;border-bottom-color:#bfdbfe;color:#1e40af">🔄 Transfer Between Locations <span style="font-size:10px;font-weight:600;color:#b45309">— move multiple products at once</span></div><div class="cb">
+    <div class="frow f3">
       <div class="fg"><label>Date *</label><input type="date" id="ft-date" value="${TODAY}"/></div>
-      <div class="fg"><label>Product / SKU *</label><select id="ft-sku" onchange="onTfChange()"><option value="">Select...</option>${products.map(p=>`<option value="${p.sku}">${esc(p.sku)} — ${esc(p.name)}</option>`).join('')}</select></div>
-    </div>
-    <div class="frow f2">
-      <div class="fg"><label>From Location *</label><select id="ft-from" onchange="onTfChange()"><option value="">From...</option>${locs.map(l=>`<option value="${l.id}">${l.icon} ${esc(l.name)}</option>`).join('')}</select></div>
+      <div class="fg"><label>From Location *</label><select id="ft-from" onchange="onTfFromChange()"><option value="">From...</option>${locs.map(l=>`<option value="${l.id}" ${tfFromLoc===l.id?'selected':''}>${l.icon} ${esc(l.name)}</option>`).join('')}</select></div>
       <div class="fg"><label>To Location *</label><select id="ft-to"><option value="">To...</option>${locs.map(l=>`<option value="${l.id}">${l.icon} ${esc(l.name)}</option>`).join('')}</select></div>
     </div>
-    <div id="ft-info" style="display:none;background:#eff6ff;border-radius:8px;padding:8px 12px;margin-bottom:10px;font-size:11px;color:#1e40af;font-weight:700"></div>
-    <div class="fg"><label>Expiry Batch to Transfer *</label>
-      <select id="ft-expiry-sel" onchange="onTfExpiryPick()"><option value="">Select product & source location first...</option></select>
-      <div class="fnote" id="ft-expiry-note">The transfer keeps the same expiry date. Choose "Auto (FEFO)" to let the system pick the nearest-expiry stock first.</div>
+    <div style="background:#eff6ff;border:1.5px solid #3b82f6;border-radius:10px;padding:12px 14px;margin-bottom:10px">
+      <div style="font-size:10px;font-weight:800;color:#1e40af;letter-spacing:.5px;margin-bottom:8px">📦 PRODUCTS TO TRANSFER — pick the source location first, then add products</div>
+      <div class="tw"><table style="width:100%;font-size:12px"><thead><tr style="background:#dbeafe"><th style="padding:5px;text-align:left;font-size:10px;min-width:150px">Product ★</th><th style="padding:5px;text-align:left;font-size:10px;min-width:180px">Expiry Batch ★</th><th style="padding:5px;text-align:left;font-size:10px">Cases</th><th style="padding:5px;text-align:left;font-size:10px">Pieces</th><th></th></tr></thead><tbody>
+        ${tfLines.map((ln,i)=>renderTfLineRow(ln,i)).join('')}
+      </tbody></table></div>
+      <button class="btn bgh bsm" onclick="addTfLine()" style="margin-top:8px">+ Add another product</button>
     </div>
-    <div class="frow f3">
-      <div class="fg"><label>Cases *</label><input type="number" id="ft-cases" min="0" value="0" oninput="calcTfQty()"/></div>
-      <div class="fg"><label>Pieces</label><input type="number" id="ft-pcs" min="0" value="0" oninput="calcTfQty()"/></div>
-      <div class="fg"><label>Batch No.</label><input id="ft-batch" placeholder="Auto from selection" readonly style="background:#f8fafc"/></div>
-    </div>
-    <div id="ft-tp" style="display:none;padding:8px 12px;background:#f8fafc;border-radius:8px;font-size:12px;font-weight:700;margin-bottom:10px"></div>
     <div class="fg"><label>Reference</label><input id="ft-ref" placeholder="Transfer reference"/></div>
     <div class="fg"><label>Notes</label><input id="ft-notes" placeholder="Optional notes"/></div>
     <button class="btn bb bbl" onclick="saveTF()" style="margin-top:6px">🔄 Save Transfer</button>
@@ -1657,6 +1652,93 @@ function renderTransfer(){
     </tbody></table></div>`:`<div class="cb" style="text-align:center;color:var(--muted);padding:30px">No transfers yet</div>`}
   </div></div>`;
 }
+let tfFromLoc='';
+// build the batch-options HTML for a given product from the current From location
+function tfBatchOptions(sku,selectedPick){
+  if(!tfFromLoc||!sku)return '<option value="">Pick source & product...</option>';
+  const batches=getBatchStock(tfFromLoc,sku);
+  if(!batches.length)return '<option value="">⚠ No stock here</option>';
+  const ppc=getPPC(sku);
+  let opts=`<option value="__FEFO__" ${selectedPick==='__FEFO__'?'selected':''}>⚡ Auto (FEFO)</option>`;
+  batches.forEach((b,bi)=>{
+    const lbl=b.expiry?fD(b.expiry):'No expiry';
+    const d=b.expiry?daysUntilExpiry(b.expiry):null;
+    const tag=d===null?'':d<0?' (EXP)':d<=30?` (${d}d⚠)`:` (${d}d)`;
+    const val='B::'+(b.expiry||'')+'::'+(b.batch||'');
+    opts+=`<option value="${esc(val)}" data-qty="${b.qty}" ${selectedPick===val?'selected':''}>${lbl}${tag} — ${cpStr(b.qty,ppc)}${b.batch?' · '+esc(b.batch):''}</option>`;
+  });
+  return opts;
+}
+function renderTfLineRow(ln,i){
+  return `<tr class="ft-line-row">
+    <td style="padding:3px"><select class="ft-sku-sel" onchange="updTfLine(${i},'sku',this.value)" style="width:155px;padding:6px;font-size:11px"><option value="">Select...</option>${products.map(p=>`<option value="${esc(p.sku)}" ${ln.sku===p.sku?'selected':''}>${esc(p.sku)} — ${esc(p.name)}</option>`).join('')}</select></td>
+    <td style="padding:3px"><select class="ft-pick-sel" onchange="updTfLine(${i},'pick',this.value)" style="width:185px;padding:6px;font-size:11px">${tfBatchOptions(ln.sku,ln.pick)}</select></td>
+    <td style="padding:3px"><input type="number" min="0" class="ft-cases" value="${ln.cases}" oninput="updTfLine(${i},'cases',this.value)" style="width:60px;padding:6px"/></td>
+    <td style="padding:3px"><input type="number" min="0" class="ft-pcs" value="${ln.pcs}" oninput="updTfLine(${i},'pcs',this.value)" style="width:60px;padding:6px"/></td>
+    <td style="padding:3px">${tfLines.length>1?`<button class="btn br bsm" onclick="delTfLine(${i})" style="padding:2px 7px">×</button>`:''}</td>
+  </tr>`;
+}
+function captureTfLines(){
+  const rows=document.querySelectorAll('.ft-line-row');if(!rows.length)return;
+  tfLines=Array.from(rows).map(r=>({sku:r.querySelector('.ft-sku-sel')?.value||'',pick:r.querySelector('.ft-pick-sel')?.value||'__FEFO__',cases:parseInt(r.querySelector('.ft-cases')?.value)||0,pcs:parseInt(r.querySelector('.ft-pcs')?.value)||0}));
+}
+function snapTfHdr(){const g=id=>document.getElementById(id)?.value;return{date:g('ft-date'),to:g('ft-to'),ref:g('ft-ref'),notes:g('ft-notes')};}
+function restTfHdr(v){if(!v)return;const s=(id,val)=>{const el=document.getElementById(id);if(el&&val)el.value=val;};s('ft-date',v.date);s('ft-to',v.to);s('ft-ref',v.ref);s('ft-notes',v.notes);}
+function onTfFromChange(){tfFromLoc=document.getElementById('ft-from')?.value||'';captureTfLines();const h=snapTfHdr();renderTransfer();restTfHdr(h);document.getElementById('ft-from').value=tfFromLoc;}
+function updTfLine(i,field,val){captureTfLines();if(!tfLines[i])return;tfLines[i][field]=(field==='cases'||field==='pcs')?(parseInt(val)||0):val;
+  // when product changes, reset batch pick and re-render that row's options
+  if(field==='sku'){tfLines[i].pick='__FEFO__';const h=snapTfHdr();renderTransfer();restTfHdr(h);document.getElementById('ft-from').value=tfFromLoc;}
+}
+function addTfLine(){captureTfLines();const h=snapTfHdr();tfLines.push({sku:'',pick:'__FEFO__',cases:0,pcs:0});renderTransfer();restTfHdr(h);document.getElementById('ft-from').value=tfFromLoc;}
+function delTfLine(i){captureTfLines();const h=snapTfHdr();tfLines.splice(i,1);if(!tfLines.length)tfLines=[{sku:'',pick:'__FEFO__',cases:0,pcs:0}];renderTransfer();restTfHdr(h);document.getElementById('ft-from').value=tfFromLoc;}
+async function saveTF(){
+  const date=document.getElementById('ft-date').value;
+  const fromLoc=document.getElementById('ft-from').value;
+  const toLoc=document.getElementById('ft-to').value;
+  const ref=document.getElementById('ft-ref').value.trim();
+  const notes=document.getElementById('ft-notes').value.trim();
+  if(!date||!fromLoc||!toLoc){msg('ft-msg','⚠ Fill Date, From and To locations',false);return;}
+  if(fromLoc===toLoc){msg('ft-msg','⚠ From and To cannot be the same',false);return;}
+  captureTfLines();
+  const valid=tfLines.filter(ln=>ln.sku&&((ln.cases||0)>0||(ln.pcs||0)>0));
+  if(!valid.length){msg('ft-msg','⚠ Add at least one product with a quantity',false);return;}
+  // validate availability for each specific-batch line BEFORE saving anything
+  for(const ln of valid){
+    const ppc=getPPC(ln.sku);const tot=ln.cases*ppc+(ln.pcs||0);
+    if(ln.pick&&ln.pick.startsWith('B::')){
+      const parts=ln.pick.split('::');const exp=parts[1]||'';const bat=parts[2]||'';
+      const liveBatches=getBatchStock(fromLoc,ln.sku);
+      const lb=liveBatches.find(b=>(b.expiry||'')===exp&&(b.batch||'')===bat)||liveBatches.find(b=>(b.expiry||'')===exp);
+      const avail=lb?lb.qty:0;
+      if(tot>avail){const p=products.find(x=>x.sku===ln.sku);msg('ft-msg',`⛔ ${esc(ln.sku)}: cannot transfer ${cpStr(tot,ppc)} — only ${cpStr(avail,ppc)} available in batch (expiry ${exp?fD(exp):'—'}).`,false);return;}
+    }else{
+      // FEFO — check total available across all batches
+      const totalAvail=getBatchStock(fromLoc,ln.sku).reduce((a,b)=>a+b.qty,0);
+      if(tot>totalAvail){const p=products.find(x=>x.sku===ln.sku);msg('ft-msg',`⛔ ${esc(ln.sku)}: cannot transfer ${cpStr(tot,ppc)} — only ${cpStr(totalAvail,ppc)} available in total.`,false);return;}
+    }
+  }
+  // all valid → perform transfers
+  let lineCount=0;
+  for(const ln of valid){
+    const ppc=getPPC(ln.sku);const tot=ln.cases*ppc+(ln.pcs||0);
+    if(ln.pick&&ln.pick.startsWith('B::')){
+      const parts=ln.pick.split('::');const exp=parts[1]||'';const bat=parts[2]||'';
+      await insertMov({id:uid(),date,sku:ln.sku,type:'TF',fromLoc,toLoc,locId:fromLoc,cases:Math.floor(tot/ppc),pcs:tot%ppc,batch:bat,expiry:exp,ref,notes,createdBy:currentUser?.name||'',ts:Date.now()});
+    }else{
+      await fefoSplit(fromLoc,ln.sku,tot,async(take,b)=>{
+        await insertMov({id:uid(),date,sku:ln.sku,type:'TF',fromLoc,toLoc,locId:fromLoc,cases:Math.floor(take/ppc),pcs:take%ppc,batch:b.batch||'',expiry:b.expiry||'',ref,notes,createdBy:currentUser?.name||'',ts:Date.now()});
+      });
+    }
+    lineCount++;
+  }
+  const uniqueProducts=new Set(valid.map(l=>l.sku)).size;
+  logAction('TRANSFER',uniqueProducts+' product(s) from '+fromLoc+' to '+toLoc);
+  msg('ft-msg','✅ Transferred '+uniqueProducts+' product'+(uniqueProducts>1?'s':'')+' with their expiry dates.',true);
+  tfLines=[{sku:'',pick:'__FEFO__',cases:0,pcs:0}];tfFromLoc='';
+  setTimeout(()=>render(),1000);
+}
+
+
 
 // ── ADJUST ───────────────────────────────────────
 function renderAdjust(){
@@ -1771,118 +1853,6 @@ async function saveMov(type){
   ['cases','pcs'].forEach(f=>{const el=document.getElementById(pre+'-'+f);if(el)el.value=0;});
   ['batch','expiry','party','ref','notes'].forEach(f=>{const el=document.getElementById(pre+'-'+f);if(el)el.value='';});
   setTimeout(()=>render(),800);
-}
-// ── TRANSFER: populate expiry/batch list from source location ──
-function onTfChange(){
-  onSkuChange('ft'); // keep existing info line behaviour
-  const sku=document.getElementById('ft-sku')?.value;
-  const fromLoc=document.getElementById('ft-from')?.value;
-  const sel=document.getElementById('ft-expiry-sel');
-  const note=document.getElementById('ft-expiry-note');
-  if(!sel)return;
-  if(!sku||!fromLoc){
-    sel.innerHTML='<option value="">Select product & source location first...</option>';
-    if(note)note.textContent='The transfer keeps the same expiry date you choose here.';
-    return;
-  }
-  const batches=getBatchStock(fromLoc,sku); // [{expiry,batch,qty}] sorted nearest-first
-  if(!batches.length){
-    sel.innerHTML='<option value="">⚠ No stock at this location</option>';
-    if(note)note.innerHTML='<b style="color:var(--red)">No stock available to transfer from this location.</b>';
-    return;
-  }
-  const ppc=getPPC(sku);
-  let opts='<option value="__FEFO__">⚡ Auto (FEFO) — nearest expiry first</option>';
-  batches.forEach((b,i)=>{
-    const lbl=b.expiry?fD(b.expiry):'No expiry';
-    const d=b.expiry?daysUntilExpiry(b.expiry):null;
-    const tag=d===null?'':d<0?' (EXPIRED)':d<=30?` (${d}d left ⚠)`:` (${d}d)`;
-    opts+=`<option value="${i}" data-expiry="${b.expiry||''}" data-batch="${esc(b.batch||'')}" data-qty="${b.qty}">${lbl}${tag} — ${cpStr(b.qty,ppc)}${b.batch?' · '+esc(b.batch):''}</option>`;
-  });
-  sel.innerHTML=opts;
-  if(note)note.textContent='Choose a specific expiry batch, or Auto (FEFO) to dispatch nearest-expiry stock first.';
-  onTfExpiryPick();
-}
-function onTfExpiryPick(){
-  const sel=document.getElementById('ft-expiry-sel');
-  const batchInput=document.getElementById('ft-batch');
-  if(!sel||!batchInput)return;
-  const opt=sel.options[sel.selectedIndex];
-  if(!opt||sel.value==='__FEFO__'||sel.value===''){batchInput.value='';}
-  else batchInput.value=opt.getAttribute('data-batch')||'';
-  calcTfQty();
-}
-// Live quantity check for transfer — warns immediately if exceeding the selected batch
-function calcTfQty(){
-  const sku=document.getElementById('ft-sku')?.value;
-  const p=products.find(x=>x.sku===sku);
-  const cases=parseInt(document.getElementById('ft-cases')?.value)||0;
-  const pcs=parseInt(document.getElementById('ft-pcs')?.value)||0;
-  const tpEl=document.getElementById('ft-tp');
-  const sel=document.getElementById('ft-expiry-sel');
-  if(!p||!tpEl)return;
-  const ppc=p.ppc;const tot=cases*ppc+pcs;
-  if(tot<=0){tpEl.style.display='none';return;}
-  tpEl.style.display='block';
-  // determine available qty for the chosen batch (or whole product for FEFO)
-  let avail=null,ctx='';
-  if(sel&&sel.value&&sel.value!=='__FEFO__'){
-    const opt=sel.options[sel.selectedIndex];
-    avail=parseInt(opt?.getAttribute('data-qty'))||0;
-    ctx='in this batch';
-  }else if(sel&&sel.value==='__FEFO__'){
-    const fromLoc=document.getElementById('ft-from')?.value;
-    if(fromLoc){avail=getBatchStock(fromLoc,sku).reduce((a,b)=>a+b.qty,0);ctx='in total (all batches)';}
-  }
-  if(avail!==null&&tot>avail){
-    tpEl.style.background='#fef2f2';tpEl.style.color='#991b1b';
-    tpEl.innerHTML=`⛔ Transferring ${tot.toLocaleString()} pcs but only <b>${cpStr(avail,ppc)}</b> available ${ctx}. Reduce the quantity.`;
-  }else{
-    tpEl.style.background='#f8fafc';tpEl.style.color='';
-    tpEl.innerHTML=`Total: ${tot.toLocaleString()} pieces (${cases} × ${ppc} + ${pcs})${avail!==null?` · ${cpStr(avail,ppc)} available ${ctx}`:''}`;
-  }
-}
-async function saveTF(){
-  const date=document.getElementById('ft-date').value;
-  const sku=document.getElementById('ft-sku').value;
-  const fromLoc=document.getElementById('ft-from').value;
-  const toLoc=document.getElementById('ft-to').value;
-  const cases=parseInt(document.getElementById('ft-cases').value)||0;
-  const pcs=parseInt(document.getElementById('ft-pcs').value)||0;
-  const ref=document.getElementById('ft-ref').value.trim();
-  const notes=document.getElementById('ft-notes').value.trim();
-  const expSel=document.getElementById('ft-expiry-sel');
-  if(!date||!sku||!fromLoc||!toLoc){msg('ft-msg','⚠ Fill all required fields',false);return;}
-  if(fromLoc===toLoc){msg('ft-msg','⚠ From and To cannot be the same',false);return;}
-  if(cases===0&&pcs===0){msg('ft-msg','⚠ Quantity cannot be zero',false);return;}
-  if(!expSel||!expSel.value){msg('ft-msg','⚠ Select an expiry batch to transfer',false);return;}
-  const ppc=getPPC(sku);const totalPcs=cases*ppc+(pcs||0);
-  const pick=expSel.value;
-  if(pick==='__FEFO__'){
-    // Auto FEFO — system splits across nearest-expiry batches
-    await fefoSplit(fromLoc,sku,totalPcs,async(take,b)=>{
-      await insertMov({id:uid(),date,sku,type:'TF',fromLoc,toLoc,locId:fromLoc,cases:Math.floor(take/ppc),pcs:take%ppc,batch:b.batch||'',expiry:b.expiry||'',ref,notes,createdBy:currentUser?.name||'',ts:Date.now()});
-    });
-  }else{
-    // Specific batch chosen → transfer keeps that exact expiry/batch
-    const opt=expSel.options[expSel.selectedIndex];
-    const pickExpiry=opt.getAttribute('data-expiry')||'';
-    const pickBatch=opt.getAttribute('data-batch')||'';
-    // Re-read live availability from stock (not just the DOM attribute) for safety
-    const liveBatches=getBatchStock(fromLoc,sku);
-    const liveBatch=liveBatches.find(b=>(b.expiry||'')===pickExpiry&&(b.batch||'')===pickBatch)
-                  ||liveBatches.find(b=>(b.expiry||'')===pickExpiry);
-    const domQty=parseInt(opt.getAttribute('data-qty'))||0;
-    const avail=liveBatch?liveBatch.qty:domQty;
-    if(totalPcs>avail){
-      msg('ft-msg',`⛔ Cannot transfer ${cpStr(totalPcs,ppc)} — only ${cpStr(avail,ppc)} available in this batch (expiry ${pickExpiry?fD(pickExpiry):'—'}). Reduce the quantity or choose Auto (FEFO).`,false);
-      return;
-    }
-    await insertMov({id:uid(),date,sku,type:'TF',fromLoc,toLoc,locId:fromLoc,cases:Math.floor(totalPcs/ppc),pcs:totalPcs%ppc,batch:pickBatch,expiry:pickExpiry,ref,notes,createdBy:currentUser?.name||'',ts:Date.now()});
-  }
-  logAction('TRANSFER',sku+' — '+cpStr(totalPcs,ppc)+' from '+fromLoc+' to '+toLoc);
-  msg('ft-msg','✅ Transfer saved — stock moved with its expiry date.',true);
-  setTimeout(()=>render(),900);
 }
 async function saveAdj(){
   const date=document.getElementById('fa-date').value;
@@ -5063,7 +5033,17 @@ function renderCash(){
 
   let tabContent='';
   if(cashTab==='collected'){
+    const cashAvailNow=cashOnHandAvailable();
+    const cashToPettyAll=(typeof pettyCash!=='undefined'?pettyCash:[]).filter(e=>e.type==='in'&&e.fromCash).reduce((a,e)=>a+(+e.amount||0),0);
+    const cashToBankAll=(typeof bankTxns!=='undefined'?bankTxns:[]).filter(t=>t.method==='cash-deposit').reduce((a,t)=>a+(+t.amount||0),0);
     tabContent=`
+    <div class="kg" style="margin-bottom:14px">
+      <div class="kpi" style="border-top-color:#059669"><div class="ki">💵</div><div class="kl">Cash Collected (period)</div><div class="kv" style="font-size:17px;color:#059669">${fmtAED(totalCashCollected)}</div><div class="ks">${collected.length} cash receipt(s)</div></div>
+      <div class="kpi" style="border-top-color:#7c3aed"><div class="ki">→</div><div class="kl">Moved to Petty Cash</div><div class="kv" style="font-size:17px;color:#7c3aed">${fmtAED(cashToPettyAll)}</div><div class="ks">all-time</div></div>
+      <div class="kpi" style="border-top-color:#0369a1"><div class="ki">🏦</div><div class="kl">Deposited to Bank</div><div class="kv" style="font-size:17px;color:#0369a1">${fmtAED(cashToBankAll)}</div><div class="ks">all-time</div></div>
+      <div class="kpi" style="border-top-color:#4DB78C"><div class="ki">👛</div><div class="kl">Cash in Drawer (now)</div><div class="kv" style="font-size:18px;color:${cashAvailNow<0?'#b91c1c':'#0c1a27'}">${fmtAED(cashAvailNow)}</div><div class="ks">available all-time</div></div>
+    </div>
+    ${cashAvailNow>0?`<div class="al al-b no-print" style="margin-bottom:14px;font-size:11px">💡 You have <b>${fmtAED(cashAvailNow)}</b> physical cash in the drawer. Deposit it to the bank, or use it to top up petty cash (Petty Cash tab → Top-up → "Fund from collected cash"). You can also deposit it from the Bank page (method = Cash Deposit).</div>`:''}
     <div class="card"><div class="ch" style="display:flex;justify-content:space-between"><span>💵 Cash Collected (${collected.length})</span><span style="font-size:12px;font-weight:800;color:#059669">Total Cash: ${fmtAED(totalCashCollected)}</span></div>
       ${collected.length?`<div class="tw"><table><thead><tr><th>Receipt #</th><th>Date</th><th>Customer</th><th>💼 Collected By</th><th>Reference</th><th class="r">Amount</th></tr></thead><tbody>
         ${collected.sort((a,b)=>b.ts-a.ts).map(p=>`<tr>
@@ -5891,7 +5871,9 @@ function renderFinStatements(){
   // Assets
   const stockValue=inventoryValue();
   const receivables=customers.reduce((a,c)=>{const b=custBalance(c.name);return a+(b.balance>0?b.balance:0);},0);
-  const cashCollected=pays.reduce((a,p)=>a+p.amount,0);
+  // Cash in drawer = approved cash receipts − cash moved to petty − cash deposited to bank (all-time, physical cash on hand)
+  const cashInDrawer=(typeof cashOnHandAvailable==='function')?cashOnHandAvailable():0;
+  // Petty cash on hand = all petty in − all petty out
   const pettyOnHand=(typeof pettyCash!=='undefined'?pettyCash:[]).reduce((a,e)=>a+(e.type==='in'?e.amount:-e.amount),0);
   const bankBal=(typeof bankBalance==='function')?bankBalance(finTo):0;
   // Liabilities
@@ -5899,7 +5881,7 @@ function renderFinStatements(){
   const shortLoans=(typeof loansOutstanding==='function')?loansOutstanding('short'):0;
   const longLoans=(typeof loansOutstanding==='function')?loansOutstanding('long'):0;
   const fixedAssets=(typeof totalAssetsBookValue==='function')?totalAssetsBookValue(finTo):0;
-  const totalAssets=stockValue+receivables+pettyOnHand+bankBal+fixedAssets;
+  const totalAssets=stockValue+receivables+cashInDrawer+pettyOnHand+bankBal+fixedAssets;
   const totalLiab=payables+shortLoans+longLoans;
   const equity=totalAssets-totalLiab;
 
@@ -5912,6 +5894,7 @@ function renderFinStatements(){
     <div class="card"><div class="ch">🏦 Balance Sheet</div><div class="tw"><table><tbody>
       ${row('ASSETS','',{head:true,bg:'#f0fdf4',color:'#166534',noval:true})}
       ${row('Bank Account',bankBal,{indent:true})}
+      ${cashInDrawer!==0?row('Cash in Drawer (collected, not deposited)',cashInDrawer,{indent:true}):''}
       ${row('Inventory (at cost)',stockValue,{indent:true})}
       ${row('Accounts Receivable (customers owe)',receivables,{indent:true})}
       ${row('Petty Cash on Hand',pettyOnHand,{indent:true})}
