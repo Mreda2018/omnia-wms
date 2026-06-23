@@ -4621,6 +4621,49 @@ async function _seedDemoEntities(silent){
     const ap={id:'dappr1',kind:'cancel',targetId:demoInvs[5].id,targetNo:demoInvs[5].invNo,requestedBy:'Noureen (Sales)',reason:'Customer cancelled the order '+TAG,status:'pending',ts:now-3600000};
     approvals.push(ap);if(SB&&!useLocal)await dbInsertApproval(ap).catch(()=>{});
   }
+  // ── Finance demo data: suppliers, purchases, expenses (incl. credit), bank, loans ──
+  if(typeof suppliers!=='undefined'){
+    suppliers=[
+      {id:'dsup1',name:'Solán de Cabras S.A. [DEMO]',country:'Spain',currency:'EUR',contact:'export@solandecabras.es',trn:'',notes:TAG,ts:now-90*86400000},
+      {id:'dsup2',name:'Almazaras de la Subbética [DEMO]',country:'Spain',currency:'EUR',contact:'sales@subbetica.com',trn:'',notes:TAG,ts:now-80*86400000}
+    ];
+    if(typeof supPurchases!=='undefined'){
+      supPurchases=[
+        {id:'dpo1',poNo:'PO-DEMO-001',supplierId:'dsup1',supplierName:'Solán de Cabras S.A. [DEMO]',date:_dDate(60),currency:'EUR',fxRate:3.95,items:[{desc:'Solán 0.5L PET — 40 cases',qty:40,unitPrice:18.5}],totalForeign:740,totalAED:2923,status:'received',notes:'Import — reverse charge '+TAG,by:'Demo',ts:now-60*86400000},
+        {id:'dpo2',poNo:'PO-DEMO-002',supplierId:'dsup2',supplierName:'Almazaras de la Subbética [DEMO]',date:_dDate(35),currency:'EUR',fxRate:3.95,items:[{desc:'ALMAOLIVA EVOO 500ml — 30 cases',qty:30,unitPrice:22},{desc:'PQO 500ml — 10 cases',qty:10,unitPrice:40}],totalForeign:1060,totalAED:4187,status:'received',notes:'Import '+TAG,by:'Demo',ts:now-35*86400000}
+      ];
+    }
+    if(typeof supPayments!=='undefined'){
+      supPayments=[
+        {id:'dsp1',supplierId:'dsup1',supplierName:'Solán de Cabras S.A. [DEMO]',date:_dDate(50),currency:'EUR',amount:740,fxRate:3.96,amountAED:2930,method:'transfer',ref:'SWIFT-7781',poNo:'PO-DEMO-001',notes:'Settled PO-DEMO-001 '+TAG,by:'Demo',ts:now-50*86400000}
+      ];
+    }
+  }
+  if(typeof expenses!=='undefined'){
+    expenses=[
+      {id:'dexp1',date:_dDate(20),category:'Rent',desc:'Warehouse rent — monthly',vendor:'Al Quoz Properties',gross:21000,hasVat:true,vatAmount:1000,net:20000,method:'bank',ref:'RENT-06',payStatus:'paid',dueDate:'',by:'Demo',status:'approved',ts:now-20*86400000},
+      {id:'dexp2',date:_dDate(15),category:'Salaries',desc:'June salaries (warehouse + drivers)',vendor:'Staff Payroll',gross:38000,hasVat:false,vatAmount:0,net:38000,method:'bank',ref:'PAY-06',payStatus:'paid',dueDate:'',by:'Demo',status:'approved',ts:now-15*86400000},
+      {id:'dexp3',date:_dDate(10),category:'Utilities',desc:'DEWA electricity & water',vendor:'DEWA',gross:3150,hasVat:true,vatAmount:150,net:3000,method:'bank',ref:'DEWA-0610',payStatus:'paid',dueDate:'',by:'Demo',status:'approved',ts:now-10*86400000},
+      {id:'dexp4',date:_dDate(6),category:'Maintenance',desc:'Monthly pest control service (paid on credit)',vendor:'PestFree Gulf LLC',gross:1050,hasVat:true,vatAmount:50,net:1000,method:'credit',ref:'PF-2291',payStatus:'unpaid',dueDate:_dDate(-24),by:'Demo',status:'approved',ts:now-6*86400000}
+    ];
+  }
+  if(typeof bankOpeningBal!=='undefined')bankOpeningBal=150000;
+  if(typeof bankTxns!=='undefined'){
+    bankTxns=[
+      {id:'dbk1',date:_dDate(20),direction:'out',amount:21000,category:'Rent',method:'bank',ref:'RENT-06',party:'Al Quoz Properties',notes:'Rent — June',source:'expense',sourceId:'dexp1',by:'Demo',ts:now-20*86400000},
+      {id:'dbk2',date:_dDate(15),direction:'out',amount:38000,category:'Salary',method:'bank',ref:'PAY-06',party:'Staff Payroll',notes:'June salaries',source:'expense',sourceId:'dexp2',by:'Demo',ts:now-15*86400000},
+      {id:'dbk3',date:_dDate(10),direction:'in',amount:45000,category:'Customer Receipt',method:'transfer',ref:'TRF-99100',party:demoCusts[3].name,notes:'Customer receipt',source:'payment',sourceId:'dpay2',by:'Demo',ts:now-10*86400000},
+      {id:'dbk4',date:_dDate(10),direction:'out',amount:3150,category:'Utilities',method:'bank',ref:'DEWA-0610',party:'DEWA',notes:'Electricity & water',source:'expense',sourceId:'dexp3',by:'Demo',ts:now-10*86400000},
+      {id:'dbk5',date:_dDate(8),direction:'out',amount:2930,category:'Supplier Payment',method:'transfer',ref:'SWIFT-7781',party:'Solán de Cabras S.A. [DEMO]',notes:'Settled PO-DEMO-001',source:'suppay',sourceId:'dsp1',by:'Demo',ts:now-8*86400000},
+      {id:'dbk6',date:_dDate(3),direction:'in',amount:10000,category:'Cash Deposit',method:'bank',ref:'DEP-0620',party:'OMNIA',notes:'Cash deposit from collections',source:'manual',sourceId:'',by:'Demo',ts:now-3*86400000}
+    ];
+  }
+  if(typeof loans!=='undefined'){
+    loans=[
+      {id:'dln1',date:_dDate(45),lender:'Emirates NBD',type:'long',principal:200000,outstanding:175000,notes:'Equipment & vehicle finance '+TAG,status:'active',by:'Demo',ts:now-45*86400000}
+    ];
+  }
+  if(typeof saveBank==='function')saveBank();if(typeof saveLoans==='function')saveLoans();if(typeof saveExp==='function')saveExp();if(typeof saveSup==='function')saveSup();if(typeof savePO==='function')savePO();if(typeof saveSupPay==='function')saveSupPay();
   save();save2();if(typeof saveRet==='function')saveRet();if(typeof saveDN==='function')saveDN();if(typeof savePay==='function')savePay();if(typeof saveAppr==='function')saveAppr();
 }
 async function clearDemoData(){
@@ -5875,8 +5918,8 @@ function renderFinStatements(){
   rets.forEach(r=>(r.items||[]).forEach(it=>{const p=products.find(x=>x.sku===it.sku);if(p){const u=(it.unit==='case'||it.unit==='cases')?(p.ppc||1):1;cogs-=(+it.qty||0)*u*(+p.cost||0);}}));
   const grossProfit=revenue-cogs;
   // Expenses (petty cash out)
-  const pettyExp=(typeof pettyCash!=='undefined'?pettyCash:[]).filter(e=>isApprovedRec(e)&&e.type==='out'&&inFin(e.date)).reduce((a,e)=>a+e.amount,0);const expModule=(typeof expensesNet==='function')?expensesNet(finFrom,finTo):0;const expenses=pettyExp+expModule;
-  const netProfit=grossProfit-expenses;
+  const pettyExp=(typeof pettyCash!=='undefined'?pettyCash:[]).filter(e=>isApprovedRec(e)&&e.type==='out'&&inFin(e.date)).reduce((a,e)=>a+e.amount,0);const expModule=(typeof expensesNet==='function')?expensesNet(finFrom,finTo):0;const totalExpenses=pettyExp+expModule;
+  const netProfit=grossProfit-totalExpenses;
   // Assets
   const stockValue=inventoryValue();
   const receivables=customers.reduce((a,c)=>{const b=custBalance(c.name);return a+(b.balance>0?b.balance:0);},0);
@@ -5887,11 +5930,12 @@ function renderFinStatements(){
   const bankBal=(typeof bankBalance==='function')?bankBalance(finTo):0;
   // Liabilities
   const payables=(typeof suppliers!=='undefined'?suppliers:[]).reduce((a,s)=>{const b=supplierBalance(s.id);return a+(b.balance>0?b.balance:0);},0);
+  const unpaidExp=(typeof expenses!=='undefined'?expenses:[]).filter(e=>e.payStatus==='unpaid'&&isApprovedRec(e)).reduce((a,e)=>a+e.gross,0);
   const shortLoans=(typeof loansOutstanding==='function')?loansOutstanding('short'):0;
   const longLoans=(typeof loansOutstanding==='function')?loansOutstanding('long'):0;
   const fixedAssets=(typeof totalAssetsBookValue==='function')?totalAssetsBookValue(finTo):0;
   const totalAssets=stockValue+receivables+cashInDrawer+pettyOnHand+bankBal+fixedAssets;
-  const totalLiab=payables+shortLoans+longLoans;
+  const totalLiab=payables+unpaidExp+shortLoans+longLoans;
   const equity=totalAssets-totalLiab;
 
   const tab=(k,lbl,icon)=>`<button class="btn bsm" style="background:${finTab===k?'var(--g)':'#fff'};color:${finTab===k?'#fff':'var(--ink)'};border:1px solid var(--border)" onclick="finTab='${k}';render()">${icon} ${lbl}</button>`;
@@ -5911,6 +5955,7 @@ function renderFinStatements(){
       ${row('Total Assets',totalAssets,{bold:true,bg:'#f8fafc',head:false})}
       ${row('LIABILITIES','',{head:true,bg:'#fef2f2',color:'#991b1b',noval:true})}
       ${row('Accounts Payable (we owe suppliers)',payables,{indent:true})}
+      ${unpaidExp>0?row('Accrued Expenses (unpaid bills)',unpaidExp,{indent:true}):''}
       ${shortLoans>0?row('Short-term Loans',shortLoans,{indent:true}):''}
       ${longLoans>0?row('Long-term Loans',longLoans,{indent:true}):''}
       ${row('Total Liabilities',totalLiab,{bold:true,bg:'#f8fafc'})}
@@ -5961,14 +6006,15 @@ function saveExp(){if(typeof DEMO_MODE!=='undefined'&&DEMO_MODE){demoSave();retu
 function loadExp(){expenses=JSON.parse(localStorage.getItem('wms_expenses')||'[]');}
 async function dbInsertExp(e){
   if(!SB||useLocal){saveExp();return;}
-  const{error}=await SB.from('expenses').insert({id:e.id,date:e.date,category:e.category||null,description:e.desc||null,vendor:e.vendor||null,gross:e.gross,has_vat:!!e.hasVat,vat_amount:e.vatAmount,net:e.net,method:e.method||null,ref:e.ref||null,created_by:e.by||null,ts:e.ts});
+  const desc=(e.payStatus==='unpaid'?'[unpaid'+(e.dueDate?':'+e.dueDate:'')+'] ':'')+(e.desc||'');
+  const{error}=await SB.from('expenses').upsert({id:e.id,date:e.date,category:e.category||null,description:desc||null,vendor:e.vendor||null,gross:e.gross,has_vat:!!e.hasVat,vat_amount:e.vatAmount,net:e.net,method:e.method||null,ref:e.ref||null,created_by:e.by||null,ts:e.ts});
   if(error){console.error('expense insert:',error);alert('⚠ Could not save expense: '+error.message+'\nMake sure expenses_setup.sql has been run.');}
 }
 async function dbDelExp(id){if(!SB||useLocal){saveExp();return;}await SB.from('expenses').delete().eq('id',id);}
 async function loadExpFromDB(){
   if(!SB)return;
   try{const{data}=await SB.from('expenses').select('*').order('date',{ascending:false});
-    expenses=(data||[]).map(r=>({id:r.id,date:r.date,category:r.category||'',desc:r.description||'',vendor:r.vendor||'',gross:+r.gross||0,hasVat:!!r.has_vat,vatAmount:+r.vat_amount||0,net:+r.net||0,method:r.method||'',ref:r.ref||'',by:r.created_by||'',ts:r.ts||0}));
+    expenses=(data||[]).map(r=>{let d=r.description||'',payStatus='paid',dueDate='';const m=d.match(/^\[unpaid(?::([\d-]+))?\]\s*/);if(m){payStatus='unpaid';dueDate=m[1]||'';d=d.replace(m[0],'');}return{id:r.id,date:r.date,category:r.category||'',desc:d,vendor:r.vendor||'',gross:+r.gross||0,hasVat:!!r.has_vat,vatAmount:+r.vat_amount||0,net:+r.net||0,method:r.method||'',ref:r.ref||'',payStatus,dueDate,by:r.created_by||'',ts:r.ts||0};});
   }catch(e){console.error('expenses load:',e);}
 }
 function ensureExpRange(){if(!expFrom){const d=new Date();expFrom=new Date(d.getFullYear(),d.getMonth(),1).toISOString().split('T')[0];expTo=new Date(d.getFullYear(),d.getMonth()+1,0).toISOString().split('T')[0];}}
@@ -6017,9 +6063,13 @@ function renderExpenses(){
       <div class="fg"><label>Amount (gross, AED) *</label><input type="number" id="exp-gross" min="0" step="0.01" placeholder="0.00" oninput="calcExpVat()"/></div>
     </div>
     <div class="frow f3" style="margin-bottom:10px">
-      <div class="fg"><label>Vendor / Paid To</label><input id="exp-vendor" placeholder="e.g. DEWA, Etisalat"/></div>
-      <div class="fg"><label>Method</label><select id="exp-method"><option value="cash">💵 Cash</option><option value="bank">🏦 Bank</option><option value="card">💳 Card</option><option value="cheque">📝 Cheque</option></select></div>
+      <div class="fg"><label>Vendor / Paid To</label><input id="exp-vendor" placeholder="e.g. DEWA, Etisalat, Pest Control Co."/></div>
+      <div class="fg"><label>Payment Status *</label><select id="exp-paystatus" onchange="onExpPayStatus()"><option value="paid">✅ Paid now</option><option value="credit">🕒 On credit (pay later)</option></select></div>
+      <div class="fg" id="exp-method-wrap"><label>Method</label><select id="exp-method"><option value="cash">💵 Cash</option><option value="bank">🏦 Bank</option><option value="card">💳 Card</option><option value="cheque">📝 Cheque</option></select></div>
+    </div>
+    <div class="frow f2" style="margin-bottom:10px">
       <div class="fg"><label>Reference / Invoice No.</label><input id="exp-ref" placeholder="Supplier invoice #"/></div>
+      <div class="fg" id="exp-due-wrap" style="display:none"><label>Due Date (when to pay)</label><input type="date" id="exp-due"/></div>
     </div>
     <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px;background:#eff6ff;border:1px solid #bfdbfe;border-radius:8px;padding:10px 12px">
       <input type="checkbox" id="exp-hasvat" onchange="calcExpVat()" style="width:18px;height:18px;flex-shrink:0"/>
@@ -6042,20 +6092,21 @@ function renderExpenses(){
     <div class="kpi" style="border-top-color:#dc2626"><div class="ki">💸</div><div class="kl">Total Expenses (gross)</div><div class="kv" style="font-size:16px;color:#dc2626">${fmtAED(totalGross)}</div></div>
     <div class="kpi" style="border-top-color:#b45309"><div class="ki">📊</div><div class="kl">Net (P&L impact)</div><div class="kv" style="font-size:16px;color:#b45309">${fmtAED(totalNet)}</div></div>
     <div class="kpi" style="border-top-color:#1d4ed8"><div class="ki">📥</div><div class="kl">Recoverable VAT</div><div class="kv" style="font-size:16px;color:#1d4ed8">${fmtAED(totalVat)}</div></div>
+    <div class="kpi" style="border-top-color:#ea580c"><div class="ki">🕒</div><div class="kl">Unpaid (on credit)</div><div class="kv" style="font-size:16px;color:#ea580c">${fmtAED(list.filter(e=>e.payStatus==='unpaid').reduce((a,e)=>a+e.gross,0))}</div><div class="ks">owed to vendors</div></div>
   </div>
   <div class="card"><div class="ch" style="display:flex;justify-content:space-between"><span>Expenses (${list.length})</span></div>
-    ${list.length?`<div class="tw"><table><thead><tr><th>Date</th><th>Category</th><th>Vendor</th><th>Description</th><th>Method</th><th class="r">Net</th><th class="r">VAT</th><th class="r">Gross</th><th>By</th>${canEditSales()?'<th></th>':''}</tr></thead><tbody>
+    ${list.length?`<div class="tw"><table><thead><tr><th>Date</th><th>Category</th><th>Vendor</th><th>Description</th><th>Status</th><th class="r">Net</th><th class="r">VAT</th><th class="r">Gross</th><th>By</th>${canEditSales()?'<th></th>':''}</tr></thead><tbody>
       ${list.map(e=>`<tr>
         <td style="font-size:11px">${fD(e.date)}</td>
         <td><span class="tag" style="background:#fef2f2;color:#991b1b">${esc(e.category||'—')}</span></td>
         <td style="font-size:11px">${esc(e.vendor||'—')}</td>
         <td style="font-size:11px">${esc(e.desc||'—')}</td>
-        <td style="font-size:10px;color:var(--muted)">${esc(e.method||'—')}</td>
+        <td style="font-size:10px">${e.payStatus==='unpaid'?`<span class="tag" style="background:#fff7ed;color:#c2410c">🕒 Unpaid${e.dueDate?' · due '+fD(e.dueDate):''}</span>`:`<span class="tag" style="background:#f0fdf4;color:#166534">✅ ${esc(e.method||'paid')}</span>`}</td>
         <td class="r">${fmtAED(e.net)}</td>
         <td class="r" style="color:${e.hasVat?'#1d4ed8':'#cbd5e1'};font-size:11px">${e.hasVat?fmtAED(e.vatAmount):'—'}</td>
         <td class="r b" style="color:#dc2626">${fmtAED(e.gross)}</td>
         <td style="font-size:10px;color:var(--muted)">${esc(e.by||'—')}</td>
-        ${canEditSales()?`<td><button class="btn br bsm" onclick="delExpense('${e.id}')">✖</button></td>`:''}
+        ${canEditSales()?`<td style="white-space:nowrap">${e.payStatus==='unpaid'?`<button class="btn bg bsm" onclick="payExpenseCredit('${e.id}')" title="Record payment">💵 Pay</button> `:''}<button class="btn br bsm" onclick="delExpense('${e.id}')">✖</button></td>`:''}
       </tr>`).join('')}
       <tr class="tfoot"><td colspan="5" class="b">TOTAL</td><td class="r b">${fmtAED(totalNet)}</td><td class="r b" style="color:#1d4ed8">${fmtAED(totalVat)}</td><td class="r b" style="color:#dc2626">${fmtAED(totalGross)}</td><td colspan="${canEditSales()?2:1}"></td></tr>
     </tbody></table></div>`:`<div class="cb" style="text-align:center;color:var(--muted);padding:30px">No expenses recorded in this period</div>`}
@@ -6065,6 +6116,13 @@ function renderExpenses(){
   </tbody></table></div></div>`:''}`;
 }
 function expThisMonth(){const d=new Date();expFrom=new Date(d.getFullYear(),d.getMonth(),1).toISOString().split('T')[0];expTo=new Date(d.getFullYear(),d.getMonth()+1,0).toISOString().split('T')[0];render();}
+function onExpPayStatus(){
+  const st=document.getElementById('exp-paystatus')?.value;
+  const methodWrap=document.getElementById('exp-method-wrap');
+  const dueWrap=document.getElementById('exp-due-wrap');
+  if(methodWrap)methodWrap.style.display=st==='credit'?'none':'';
+  if(dueWrap)dueWrap.style.display=st==='credit'?'':'none';
+}
 async function saveExpense(){
   const date=document.getElementById('exp-date').value;
   const gross=+document.getElementById('exp-gross').value;
@@ -6073,16 +6131,32 @@ async function saveExpense(){
   const hasVat=document.getElementById('exp-hasvat').checked;
   const vatAmount=hasVat?+(gross*VAT_RATE/(1+VAT_RATE)).toFixed(2):0;
   const net=+(gross-vatAmount).toFixed(2);
-  const e={id:uid(),date,category:document.getElementById('exp-cat').value,desc:document.getElementById('exp-desc').value.trim(),vendor:document.getElementById('exp-vendor').value.trim(),gross:+gross.toFixed(2),hasVat,vatAmount,net,method:document.getElementById('exp-method').value,ref:document.getElementById('exp-ref').value.trim(),by:currentUser?.name||'',status:needsFinApproval()?'pending':'approved',ts:Date.now()};
+  const payStatus=document.getElementById('exp-paystatus')?.value||'paid';
+  const isCredit=payStatus==='credit';
+  const due=isCredit?(document.getElementById('exp-due')?.value||''):'';
+  const e={id:uid(),date,category:document.getElementById('exp-cat').value,desc:document.getElementById('exp-desc').value.trim(),vendor:document.getElementById('exp-vendor').value.trim(),gross:+gross.toFixed(2),hasVat,vatAmount,net,method:isCredit?'credit':document.getElementById('exp-method').value,ref:document.getElementById('exp-ref').value.trim(),payStatus:isCredit?'unpaid':'paid',dueDate:due,by:currentUser?.name||'',status:needsFinApproval()?'pending':'approved',ts:Date.now()};
   expenses.push(e);await dbInsertExp(e);saveExp();
-  // auto-deduct from bank if paid by a bank method (bank/cheque/card) and approved
-  if(e.status==='approved'&&isBankMethod(e.method)){
+  // auto-deduct from bank ONLY if paid now by a bank method (credit expenses don't touch bank until paid)
+  if(e.status==='approved'&&!isCredit&&isBankMethod(e.method)){
     await syncBankFromSource('expense',e.id,{date:e.date,direction:'out',amount:e.gross,category:e.category||'Other Expense',method:e.method,ref:e.ref||'',party:e.vendor||'',notes:e.category+(e.desc?' — '+e.desc:'')});
   }
-  await logAction('EXPENSE_RECORDED',e.category+' — '+fmtAED(e.gross)+(hasVat?' (incl VAT '+fmtAED(vatAmount)+')':'')+(e.vendor?' — '+e.vendor:'')+(e.status==='pending'?' [PENDING APPROVAL]':'')+(isBankMethod(e.method)&&e.status==='approved'?' [→ Bank]':''));
+  await logAction('EXPENSE_RECORDED',e.category+' — '+fmtAED(e.gross)+(hasVat?' (incl VAT '+fmtAED(vatAmount)+')':'')+(e.vendor?' — '+e.vendor:'')+(isCredit?' [ON CREDIT — UNPAID]':'')+(e.status==='pending'?' [PENDING APPROVAL]':'')+(!isCredit&&isBankMethod(e.method)&&e.status==='approved'?' [→ Bank]':''));
   if(e.status==='pending'){await createFinApproval('expense',e.id,e.category+' '+fmtAED(e.gross),e.gross);msg('exp-msg','✅ Expense submitted — pending management approval before it counts in reports.',true);}
-  else msg('exp-msg','✅ Expense saved!'+(isBankMethod(e.method)?' Deducted from bank.':''),true);
+  else msg('exp-msg','✅ Expense saved!'+(isCredit?' Recorded as unpaid (Accounts Payable).':(isBankMethod(e.method)?' Deducted from bank.':'')),true);
   setTimeout(()=>render(),900);
+}
+// Pay a credit (unpaid) expense later → deducts from bank/cash now
+async function payExpenseCredit(id){
+  const e=expenses.find(x=>x.id===id);if(!e||e.payStatus==='paid')return;
+  const method=prompt('How are you paying this '+fmtAED(e.gross)+' expense?\nType: bank / cheque / online / cash');
+  if(method===null)return;
+  const m=(method||'').trim().toLowerCase();
+  if(!['bank','cheque','online','cash','card'].includes(m)){alert('Enter one of: bank, cheque, online, cash, card');return;}
+  e.payStatus='paid';e.method=m;e.paidAt=Date.now();
+  await dbInsertExp(e);saveExp();
+  if(isBankMethod(m)){await syncBankFromSource('expense',e.id,{date:TODAY,direction:'out',amount:e.gross,category:e.category||'Other Expense',method:m,ref:e.ref||'',party:e.vendor||'',notes:'Credit expense paid — '+e.category});}
+  await logAction('EXPENSE_CREDIT_PAID',e.category+' — '+fmtAED(e.gross)+' via '+m+(isBankMethod(m)?' [→ Bank]':''));
+  render();
 }
 async function delExpense(id){const e=expenses.find(x=>x.id===id);if(!e)return;if(!confirm('Delete this expense?'))return;expenses=expenses.filter(x=>x.id!==id);await dbDelExp(id);saveExp();await syncBankFromSource('expense',id,null);await logAction('EXPENSE_DELETED',e.category+' — '+fmtAED(e.gross));render();}
 function exportExpensesCSV(){
