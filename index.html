@@ -68,6 +68,17 @@ input,select,textarea,button{font-family:inherit;font-size:15px;}
 .kpi .kl{font-size:10px;color:var(--muted);margin-bottom:1px;}
 .kpi .kv{font-size:17px;font-weight:800;color:var(--dark);line-height:1.2;}
 .kpi .ks{font-size:10px;color:var(--muted);margin-top:1px;}
+/* DASHBOARD HERO + CHARTS */
+.dash-hero{display:grid;grid-template-columns:repeat(auto-fill,minmax(210px,1fr));gap:12px;}
+.dkpi{background:var(--w);border-radius:14px;padding:15px 16px;box-shadow:0 1px 8px rgba(12,26,39,.07);display:flex;align-items:center;gap:13px;transition:transform .12s,box-shadow .12s;border:1px solid #eef2f6;}
+.dkpi:hover{transform:translateY(-2px);box-shadow:0 4px 16px rgba(12,26,39,.1);}
+.dkpi-ic{width:42px;height:42px;border-radius:11px;display:flex;align-items:center;justify-content:center;font-size:20px;flex-shrink:0;}
+.dkpi-l{font-size:10px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.3px;}
+.dkpi-v{font-size:19px;font-weight:800;color:var(--dark);line-height:1.15;margin:1px 0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.dkpi-s{font-size:10px;color:var(--muted);}
+.dash-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(330px,1fr));gap:14px;}
+.dash-wide{grid-column:1 / -1;}
+@media(max-width:640px){.dash-hero{grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:9px;}.dkpi{padding:12px;gap:10px;}.dkpi-ic{width:36px;height:36px;font-size:17px;}.dkpi-v{font-size:16px;}.dash-grid{grid-template-columns:1fr;}}
 /* CARD */
 .card{background:var(--w);border-radius:12px;box-shadow:0 1px 6px rgba(0,0,0,.06);
   margin-bottom:14px;overflow:hidden;}
@@ -1249,6 +1260,53 @@ function updateExpBadge(){
 }
 
 // ── DASHBOARD ────────────────────────────────────
+// ══════════ SVG CHART HELPERS (offline, no external library) ══════════
+function svgLineChart(series,opts){
+  // series: [{name,color,data:[n,...]}], opts:{labels:[],h,w}
+  const w=opts.w||520,h=opts.h||180,pad={l:42,r:14,t:14,b:26};
+  const iw=w-pad.l-pad.r,ih=h-pad.t-pad.b;
+  const all=series.flatMap(s=>s.data);
+  const max=Math.max(1,...all),min=0;
+  const n=opts.labels.length;
+  const x=i=>pad.l+(n<=1?iw/2:iw*i/(n-1));
+  const y=v=>pad.t+ih-(ih*(v-min)/(max-min||1));
+  const grid=[0,.25,.5,.75,1].map(f=>{const gy=pad.t+ih-ih*f;const val=Math.round(max*f);return`<line x1="${pad.l}" y1="${gy}" x2="${w-pad.r}" y2="${gy}" stroke="#eef2f6" stroke-width="1"/><text x="${pad.l-6}" y="${gy+3}" text-anchor="end" font-size="9" fill="#94a3b8">${val>=1000?(val/1000).toFixed(0)+'k':val}</text>`;}).join('');
+  const xlabels=opts.labels.map((l,i)=>`<text x="${x(i)}" y="${h-8}" text-anchor="middle" font-size="9" fill="#64748b">${l}</text>`).join('');
+  const paths=series.map(s=>{
+    const pts=s.data.map((v,i)=>`${x(i)},${y(v)}`).join(' ');
+    const area=`${pad.l},${pad.t+ih} ${pts} ${x(s.data.length-1)},${pad.t+ih}`;
+    const dots=s.data.map((v,i)=>`<circle cx="${x(i)}" cy="${y(v)}" r="3" fill="${s.color}"/>`).join('');
+    return`<polygon points="${area}" fill="${s.color}" opacity="0.07"/><polyline points="${pts}" fill="none" stroke="${s.color}" stroke-width="2.5" stroke-linejoin="round" stroke-linecap="round"/>${dots}`;
+  }).join('');
+  return`<svg viewBox="0 0 ${w} ${h}" style="width:100%;height:auto;max-height:${h}px">${grid}${paths}${xlabels}</svg>`;
+}
+function svgDonut(segments,opts){
+  // segments:[{label,value,color}], opts:{size}
+  const size=opts.size||150,r=size/2,ir=r*0.62,cx=r,cy=r;
+  const total=segments.reduce((a,s)=>a+s.value,0)||1;
+  let ang=-Math.PI/2;
+  const arcs=segments.map(s=>{
+    const frac=s.value/total,a2=ang+frac*Math.PI*2;
+    const x1=cx+r*Math.cos(ang),y1=cy+r*Math.sin(ang),x2=cx+r*Math.cos(a2),y2=cy+r*Math.sin(a2);
+    const xi2=cx+ir*Math.cos(a2),yi2=cy+ir*Math.sin(a2),xi1=cx+ir*Math.cos(ang),yi1=cy+ir*Math.sin(ang);
+    const large=frac>0.5?1:0;
+    const path=`<path d="M${x1},${y1} A${r},${r} 0 ${large} 1 ${x2},${y2} L${xi2},${yi2} A${ir},${ir} 0 ${large} 0 ${xi1},${yi1} Z" fill="${s.color}"/>`;
+    ang=a2;return path;
+  }).join('');
+  return`<svg viewBox="0 0 ${size} ${size}" style="width:${size}px;height:${size}px">${arcs}<text x="${cx}" y="${cy-3}" text-anchor="middle" font-size="13" font-weight="800" fill="#0c1a27">${total>=1000?(total/1000).toFixed(0)+'k':total}</text><text x="${cx}" y="${cy+11}" text-anchor="middle" font-size="8" fill="#94a3b8">TOTAL</text></svg>`;
+}
+function svgBars(items,opts){
+  // items:[{label,value,color}], horizontal bars
+  const max=Math.max(1,...items.map(i=>i.value));
+  return items.map(it=>{
+    const pct=Math.round(it.value/max*100);
+    return`<div style="margin-bottom:9px">
+      <div style="display:flex;justify-content:space-between;font-size:10px;margin-bottom:3px"><span style="font-weight:600;color:#334155">${it.label}</span><span style="font-weight:800;color:${it.color||'#0c1a27'}">${opts&&opts.fmt?opts.fmt(it.value):it.value}</span></div>
+      <div style="background:#eef2f6;border-radius:5px;height:8px;overflow:hidden"><div style="width:${pct}%;height:100%;background:${it.color||'#4DB78C'};border-radius:5px"></div></div>
+    </div>`;
+  }).join('');
+}
+
 function renderDashboard(){
   const lm=locMap(),pm=prodMap();
   let totalPcs=0,totalSkus=0,totalVal=0;
@@ -1256,103 +1314,125 @@ function renderDashboard(){
   const lowItems=[],negItems=[],expItems=[];
   locs.forEach(l=>{products.forEach(p=>{const cl=getClose(l.id,p.sku);if(cl<0)negItems.push({l,p,cl});else if(cl>0&&cl<(p.reorder||p.ppc))lowItems.push({l,p,cl});});});
   movements.filter(m=>m.type==='IN'&&m.expiry).forEach(m=>{const d=daysUntilExpiry(m.expiry);if(d!==null&&d<=90){const p=pm[m.sku]||{};expItems.push({m,p,d,loc:lm[m.locId]||{}});}});
-
   const recent=movements.slice(-6).reverse();
-  const locCards=locs.map(loc=>{
-    let lPcs=0,lVal=0,lSkus=0;
-    products.forEach(p=>{const cl=Math.max(0,getClose(loc.id,p.sku));lPcs+=cl;lVal+=cl*(p.cost||0);if(cl>0)lSkus++;});
-    return{loc,lPcs,lVal,lSkus};
-  });
+  const fin=canAccess('invoices')||canAccess('payments')||canAccess('expenses')||canAccess('cash');
+  const expired=expItems.filter(e=>e.d<0).length, exp30=expItems.filter(e=>e.d>=0&&e.d<=30).length;
+
+  // ── Financial figures (last 6 months) ──
+  const now=new Date();
+  const months=[];for(let i=5;i>=0;i--){const d=new Date(now.getFullYear(),now.getMonth()-i,1);months.push({y:d.getFullYear(),m:d.getMonth(),label:d.toLocaleDateString('en-GB',{month:'short'})});}
+  const inMonth=(date,mo)=>{if(!date)return false;const d=new Date(date);return d.getFullYear()===mo.y&&d.getMonth()===mo.m;};
+  const apprOK=r=>!r.status||r.status==='approved';
+  const salesByM=months.map(mo=>(typeof invoices!=='undefined'?invoices:[]).filter(i=>!i.cancelled&&inMonth(i.date,mo)).reduce((a,i)=>a+(+i.total||0),0));
+  const recvByM=months.map(mo=>(typeof payments!=='undefined'?payments:[]).filter(p=>!p.cancelled&&apprOK(p)&&inMonth(p.date,mo)).reduce((a,p)=>a+(+p.amount||0),0));
+  const expByM=months.map(mo=>(typeof expenses!=='undefined'?expenses:[]).filter(e=>apprOK(e)&&inMonth(e.date,mo)).reduce((a,e)=>a+(+e.gross||0),0));
+  const thisMo={y:now.getFullYear(),m:now.getMonth()};
+  const monthSales=salesByM[5],monthReceipts=recvByM[5],monthExp=expByM[5];
+  const receivables=(typeof customers!=='undefined'?customers:[]).reduce((a,c)=>{try{const b=custBalance(c.name);return a+(b.balance>0?b.balance:0);}catch(e){return a;}},0);
+  const pendingAppr=(typeof approvals!=='undefined'?approvals:[]).filter(a=>a.status==='pending').length;
+  const monthLabel=now.toLocaleDateString('en-GB',{month:'long',year:'numeric'});
+  const aed=n=>'AED '+(+n||0).toLocaleString('en-AE',{maximumFractionDigits:0});
+
+  // ── KPI hero cards ──
+  const kpi=(icon,label,val,sub,color,onclick)=>`<div class="dkpi"${onclick?` onclick="${onclick}" style="cursor:pointer"`:''}>
+    <div class="dkpi-ic" style="background:${color}22;color:${color}">${icon}</div>
+    <div style="flex:1;min-width:0"><div class="dkpi-l">${label}</div><div class="dkpi-v">${val}</div><div class="dkpi-s">${sub}</div></div></div>`;
+
+  let heroCards='';
+  if(fin){
+    heroCards+=kpi('🧾','Sales · '+months[5].label,aed(monthSales),'invoiced this month','#059669');
+    if(canAccess('payments')){heroCards+=kpi('💵','Collected · '+months[5].label,aed(monthReceipts),'payments received','#0369a1');
+      heroCards+=kpi('⏳','Receivables',aed(receivables),'outstanding from customers','#d97706');}
+    if(canAccess('expenses'))heroCards+=kpi('💸','Expenses · '+months[5].label,aed(monthExp),'this month','#dc2626');
+  }
+  heroCards+=kpi('💰','Stock Value',aed(totalVal),totalSkus+' SKUs · '+totalPcs.toLocaleString()+' pcs','#3b82f6');
+  if(!fin){heroCards+=kpi('📦','Total Stock',totalPcs.toLocaleString()+' pcs','across '+locs.length+' locations','#0c8a6e');
+    heroCards+=kpi('⚠️','Low Stock',lowItems.length,'below reorder level','#f59e0b');}
+  heroCards+=kpi('⏰','Expiry Alerts',expItems.length,expired+' expired · '+exp30+' within 30d',expired?'#ef4444':exp30?'#f59e0b':'#0c8a6e');
+  if(canApprove()&&pendingAppr>0)heroCards+=kpi('✅','Pending Approvals',pendingAppr,'awaiting your review →','#7c3aed',"go('approvals')");
+
+  // ── Stock value by location (donut) ──
+  const locColors=['#4DB78C','#3b82f6','#f59e0b','#8b5cf6','#ec4899','#14b8a6','#f97316'];
+  const locSeg=locs.map((loc,i)=>{let v=0;products.forEach(p=>{v+=Math.max(0,getClose(loc.id,p.sku))*(p.cost||0);});return{label:loc.name,value:Math.round(v),color:locColors[i%locColors.length]};}).filter(s=>s.value>0);
+
+  // ── Top products by stock value (bars) ──
+  const prodVal=products.map(p=>{let pcs=0;locs.forEach(l=>{pcs+=Math.max(0,getClose(l.id,p.sku));});return{label:p.name.length>22?p.name.slice(0,22)+'…':p.name,value:Math.round(pcs*(p.cost||0)),color:'#4DB78C'};}).filter(x=>x.value>0).sort((a,b)=>b.value-a.value).slice(0,6);
+
+  // ── Top customers by sales (bars) — only financial roles ──
+  const custAgg={};
+  if(fin)(typeof invoices!=='undefined'?invoices:[]).filter(i=>!i.cancelled).forEach(i=>{custAgg[i.customerName]=(custAgg[i.customerName]||0)+(+i.total||0);});
+  const topCust=Object.entries(custAgg).map(([k,v],idx)=>({label:k.length>22?k.slice(0,22)+'…':k,value:Math.round(v),color:'#0369a1'})).sort((a,b)=>b.value-a.value).slice(0,6);
+
+  const maxFin=Math.max(1,...salesByM,...recvByM,...expByM);
 
   document.getElementById('content').innerHTML=`
-  <div class="kg">
-    <div class="kpi"><div class="ki">📦</div><div class="kl">Total Stock (all locations)</div><div class="kv">${totalPcs.toLocaleString()}</div><div class="ks">pieces across ${locs.length} locations</div></div>
-    <div class="kpi" style="border-top-color:#3b82f6"><div class="ki">💰</div><div class="kl">Total Stock Value</div><div class="kv">AED ${totalVal.toLocaleString('en-AE',{minimumFractionDigits:0,maximumFractionDigits:0})}</div><div class="ks">at cost price</div></div>
-    <div class="kpi" style="border-top-color:#f59e0b"><div class="ki">⚠️</div><div class="kl">Low Stock Items</div><div class="kv" style="color:${lowItems.length?'var(--amber)':'var(--g)'}">${lowItems.length}</div><div class="ks">below reorder level</div></div>
-    <div class="kpi" style="border-top-color:#ef4444"><div class="ki">⏰</div><div class="kl">Expiry Alerts</div><div class="kv" style="color:${expItems.filter(e=>e.d<0).length?'var(--red)':expItems.filter(e=>e.d<=30).length?'var(--amber)':'var(--g)'}">${expItems.length}</div><div class="ks">${expItems.filter(e=>e.d<0).length} expired · ${expItems.filter(e=>e.d>=0&&e.d<=30).length} within 30d</div></div>
-    <div class="kpi" style="border-top-color:#8b5cf6"><div class="ki">📊</div><div class="kl">Total Movements</div><div class="kv">${movements.length}</div><div class="ks">all time entries</div></div>
+  <div class="dash-hero">${heroCards}</div>
+
+  ${negItems.length?`<div class="al al-r" style="margin-top:14px">🔴 <div><b>Negative Stock:</b> ${negItems.map(i=>`${i.l.name} · ${i.p.sku} (${i.cl})`).join(' | ')}</div></div>`:''}
+  ${expired?`<div class="al al-r" style="margin-top:${negItems.length?'8':'14'}px">☠️ <div><b>EXPIRED:</b> ${expItems.filter(e=>e.d<0).map(i=>`${i.m.sku} @ ${i.loc.name} (${fD(i.m.expiry)})`).join(' | ')}</div></div>`:''}
+  ${exp30?`<div class="al al-a" style="margin-top:8px">⏰ <div><b>Expiring within 30 days:</b> ${expItems.filter(e=>e.d>=0&&e.d<=30).map(i=>`${i.m.sku} @ ${i.loc.name} (${i.d}d)`).join(' | ')}</div></div>`:''}
+
+  <div class="dash-grid" style="margin-top:14px">
+    ${fin?`<div class="card dash-wide"><div class="ch">📈 Sales, Collections & Expenses <span style="font-size:11px;font-weight:400;color:var(--muted)">— last 6 months</span></div>
+      <div class="cb" style="padding:16px 14px 6px">
+        ${svgLineChart([{name:'Sales',color:'#059669',data:salesByM},{name:'Collected',color:'#0369a1',data:recvByM},{name:'Expenses',color:'#dc2626',data:expByM}],{labels:months.map(m=>m.label),h:200})}
+        <div style="display:flex;gap:18px;justify-content:center;margin-top:6px;flex-wrap:wrap">
+          <span style="font-size:10px;color:#475569"><span style="display:inline-block;width:10px;height:10px;background:#059669;border-radius:3px;vertical-align:middle"></span> Sales</span>
+          <span style="font-size:10px;color:#475569"><span style="display:inline-block;width:10px;height:10px;background:#0369a1;border-radius:3px;vertical-align:middle"></span> Collected</span>
+          <span style="font-size:10px;color:#475569"><span style="display:inline-block;width:10px;height:10px;background:#dc2626;border-radius:3px;vertical-align:middle"></span> Expenses</span>
+        </div>
+      </div></div>`:''}
+
+    ${locSeg.length?`<div class="card"><div class="ch">🏢 Stock Value by Location</div>
+      <div class="cb" style="display:flex;align-items:center;gap:14px;flex-wrap:wrap;justify-content:center">
+        ${svgDonut(locSeg,{size:150})}
+        <div style="flex:1;min-width:130px">
+          ${locSeg.map(s=>`<div style="display:flex;align-items:center;gap:7px;margin-bottom:6px;font-size:11px">
+            <span style="width:11px;height:11px;border-radius:3px;background:${s.color};flex-shrink:0"></span>
+            <span style="flex:1;color:#334155">${esc(s.label)}</span>
+            <b style="color:#0c1a27">${aed(s.value)}</b></div>`).join('')}
+        </div>
+      </div></div>`:''}
   </div>
 
-  ${(()=>{
-    // Financial summary row — only for roles that can see financial modules
-    if(!canAccess('invoices')&&!canAccess('payments')&&!canAccess('expenses')&&!canAccess('cash'))return '';
-    const today=new Date();const mStart=new Date(today.getFullYear(),today.getMonth(),1).toISOString().split('T')[0];const mEnd=new Date(today.getFullYear(),today.getMonth()+1,0).toISOString().split('T')[0];
-    const inM=d=>d>=mStart&&d<=mEnd;
-    const apprOK=r=>!r.status||r.status==='approved';
-    const monthSales=(typeof invoices!=='undefined'?invoices:[]).filter(i=>!i.cancelled&&inM(i.date)).reduce((a,i)=>a+(+i.total||0),0);
-    const monthReceipts=(typeof payments!=='undefined'?payments:[]).filter(p=>!p.cancelled&&apprOK(p)&&inM(p.date)).reduce((a,p)=>a+(+p.amount||0),0);
-    const monthExp=(typeof expenses!=='undefined'?expenses:[]).filter(e=>apprOK(e)&&inM(e.date)).reduce((a,e)=>a+(+e.gross||0),0);
-    const receivables=(typeof customers!=='undefined'?customers:[]).reduce((a,c)=>{try{const b=custBalance(c.name);return a+(b.balance>0?b.balance:0);}catch(e){return a;}},0);
-    const pendingAppr=(typeof approvals!=='undefined'?approvals:[]).filter(a=>a.status==='pending').length;
-    const monthLabel=today.toLocaleDateString('en-GB',{month:'long',year:'numeric'});
-    const cards=[];
-    if(canAccess('invoices'))cards.push(`<div class="kpi" style="border-top-color:#059669"><div class="ki">🧾</div><div class="kl">Sales — ${monthLabel}</div><div class="kv" style="font-size:17px;color:#059669">AED ${monthSales.toLocaleString('en-AE',{maximumFractionDigits:0})}</div><div class="ks">invoiced this month</div></div>`);
-    if(canAccess('payments'))cards.push(`<div class="kpi" style="border-top-color:#0369a1"><div class="ki">💵</div><div class="kl">Collected — ${monthLabel}</div><div class="kv" style="font-size:17px;color:#0369a1">AED ${monthReceipts.toLocaleString('en-AE',{maximumFractionDigits:0})}</div><div class="ks">payments received</div></div>`);
-    if(canAccess('payments')||canAccess('statement'))cards.push(`<div class="kpi" style="border-top-color:#d97706"><div class="ki">⏳</div><div class="kl">Receivables</div><div class="kv" style="font-size:17px;color:#d97706">AED ${receivables.toLocaleString('en-AE',{maximumFractionDigits:0})}</div><div class="ks">outstanding from customers</div></div>`);
-    if(canAccess('expenses'))cards.push(`<div class="kpi" style="border-top-color:#dc2626"><div class="ki">💸</div><div class="kl">Expenses — ${monthLabel}</div><div class="kv" style="font-size:17px;color:#dc2626">AED ${monthExp.toLocaleString('en-AE',{maximumFractionDigits:0})}</div><div class="ks">this month</div></div>`);
-    if(canApprove()&&pendingAppr>0)cards.push(`<div class="kpi" style="border-top-color:#7c3aed;cursor:pointer" onclick="go('approvals')"><div class="ki">✅</div><div class="kl">Pending Approvals</div><div class="kv" style="font-size:17px;color:#7c3aed">${pendingAppr}</div><div class="ks">awaiting your review →</div></div>`);
-    return cards.length?`<div class="kg" style="margin-top:14px">${cards.join('')}</div>`:'';
-  })()}
-
-  ${negItems.length?`<div class="al al-r">🔴 <div><b>Negative Stock Alert:</b> ${negItems.map(i=>`${i.l.name} · ${i.p.sku} (${i.cl} pcs)`).join(' | ')}</div></div>`:''}
-  ${lowItems.length?`<div class="al al-a">⚠️ <div><b>Low Stock:</b> ${lowItems.slice(0,5).map(i=>`${i.l.name} · ${i.p.sku} (${cpStr(i.cl,getPPC(i.p.sku))})`).join(' | ')}${lowItems.length>5?` + ${lowItems.length-5} more`:''}</div></div>`:''}
-  ${expItems.filter(e=>e.d<0).length?`<div class="al al-r">☠️ <div><b>EXPIRED:</b> ${expItems.filter(e=>e.d<0).map(i=>`${i.m.sku} @ ${i.loc.name} (Batch: ${i.m.batch||'—'}, Exp: ${fD(i.m.expiry)})`).join(' | ')}</div></div>`:''}
-  ${expItems.filter(e=>e.d>=0&&e.d<=30).length?`<div class="al al-a">⏰ <div><b>Expiring within 30 days:</b> ${expItems.filter(e=>e.d>=0&&e.d<=30).map(i=>`${i.m.sku} @ ${i.loc.name} (${i.d}d)`).join(' | ')}</div></div>`:''}
+  <div class="dash-grid" style="margin-top:14px">
+    ${prodVal.length?`<div class="card"><div class="ch">📦 Top Products by Stock Value</div>
+      <div class="cb">${svgBars(prodVal,{fmt:aed})}</div></div>`:''}
+    ${fin&&topCust.length?`<div class="card"><div class="ch">🏆 Top Customers by Sales <span style="font-size:11px;font-weight:400;color:var(--muted)">— all time</span></div>
+      <div class="cb">${svgBars(topCust,{fmt:aed})}</div></div>`:`
+    ${lowItems.length?`<div class="card"><div class="ch" style="background:#fffbeb;border-bottom-color:#fcd34d;color:#92400e">⚠️ Low Stock (${lowItems.length})</div>
+      <div class="cb">${svgBars(lowItems.slice(0,6).map(i=>({label:i.p.name.length>22?i.p.name.slice(0,22)+'…':i.p.name,value:Math.max(0,i.cl),color:'#f59e0b'})),{})}</div></div>`:''}`}
+  </div>
 
   ${(()=>{
     const agg={};
     products.forEach(p=>{let tot=0;locs.forEach(l=>{tot+=Math.max(0,getClose(l.id,p.sku));});agg[p.sku]={p,tot};});
     const need=Object.values(agg).filter(x=>x.tot<(x.p.reorder||0)).sort((a,b)=>(a.tot/(a.p.reorder||1))-(b.tot/(b.p.reorder||1)));
     if(!need.length)return '';
-    return `<div class="card" style="margin-bottom:14px"><div class="ch" style="background:#fffbeb;border-bottom-color:#fcd34d;color:#92400e;display:flex;justify-content:space-between"><span>🛒 Reorder Suggestions (${need.length} items below reorder level)</span><button class="btn bd bsm no-print" onclick="window.print()">🖨 Print</button></div>
-      <div class="tw"><table><thead><tr><th>SKU</th><th>Product</th><th>Brand</th><th class="r">In Stock (pcs)</th><th class="r">Reorder Level</th><th class="r">Shortfall</th></tr></thead><tbody>
-      ${need.map(x=>`<tr>
+    return `<div class="card" style="margin-top:14px"><div class="ch" style="background:#fffbeb;border-bottom-color:#fcd34d;color:#92400e;display:flex;justify-content:space-between"><span>🛒 Reorder Suggestions (${need.length} items below reorder level)</span><button class="btn bd bsm no-print" onclick="window.print()">🖨 Print</button></div>
+      <div class="tw"><table><thead><tr><th>SKU</th><th>Product</th><th class="r">In Stock</th><th class="r">Reorder Level</th><th class="r">Shortfall</th></tr></thead><tbody>
+      ${need.slice(0,10).map(x=>`<tr>
         <td class="mono" style="font-size:11px">${esc(x.p.sku)}</td>
         <td style="font-weight:600">${esc(x.p.name)}</td>
-        <td style="font-size:11px;color:var(--muted)">${esc(x.p.brand||'—')}</td>
         <td class="r b" style="color:${x.tot<=0?'#b91c1c':'#b45309'}">${x.tot}</td>
         <td class="r">${x.p.reorder||0}</td>
         <td class="r b" style="color:#b91c1c">${Math.max(0,(x.p.reorder||0)-x.tot)}</td>
       </tr>`).join('')}
       </tbody></table></div></div>`;
   })()}
-    <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:10px;margin-bottom:14px">
-    ${locCards.map(({loc,lPcs,lVal,lSkus})=>`
-    <div class="card" style="cursor:pointer" onclick="go('rep-${loc.id}')">
-      <div class="ch">${loc.icon} ${esc(loc.name)} <span style="font-size:11px;color:var(--muted);font-weight:400">→ Report</span></div>
-      <div class="cb">
-        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
-          <div style="background:var(--gl);border-radius:8px;padding:10px;text-align:center">
-            <div style="font-size:9px;color:var(--gd);font-weight:800;margin-bottom:2px">PIECES</div>
-            <div style="font-size:17px;font-weight:900;color:var(--dark)">${lPcs.toLocaleString()}</div>
-          </div>
-          <div style="background:#f8fafc;border-radius:8px;padding:10px;text-align:center">
-            <div style="font-size:9px;color:var(--muted);font-weight:800;margin-bottom:2px">VALUE (AED)</div>
-            <div style="font-size:15px;font-weight:900;color:var(--dark)">${lVal.toLocaleString('en-AE',{maximumFractionDigits:0})}</div>
-          </div>
-        </div>
-        <div style="margin-top:8px;font-size:11px;color:var(--muted);text-align:center">${lSkus} active SKUs</div>
-      </div>
-    </div>`).join('')}
-  </div>
 
-  ${recent.length?`<div class="card"><div class="ch">Recent Movements <span style="font-size:11px;font-weight:400;color:var(--muted)">(last 6)</span></div>
-  <div class="tw"><table class="fixed"><thead><tr>
-    <th>Date</th><th>Type</th><th>Location</th><th>SKU</th><th class="r">Cases</th><th class="r">Pcs</th><th>Batch</th><th>Expiry</th><th>Ref</th>
-  </tr></thead><tbody>
-    ${recent.map(m=>{const lm2=locMap();const d=m.expiry?daysUntilExpiry(m.expiry):null;const ec=expClass(d);return`<tr>
-      <td>${fD(m.date)}</td>
-      <td><span class="tag ${m.type==='IN'?'t-in':m.type==='OUT'?'t-out':m.type==='TF'?'t-tf':'t-adj'}">${m.type==='IN'?'▲ IN':m.type==='OUT'?'▼ OUT':m.type==='TF'?'⇄ TF':'± ADJ'}</span></td>
-      <td style="font-size:11px">${esc(lm2[m.locId||m.fromLoc]?.name||m.locId||'')}</td>
-      <td class="mono">${esc(m.sku)}</td>
-      <td class="r b">${m.cases}</td>
-      <td class="r">${m.pcs||0}</td>
-      <td style="font-size:11px;color:var(--muted)">${esc(m.batch||'—')}</td>
-      <td class="${ec}" style="font-size:11px">${m.expiry?fD(m.expiry):'—'} ${expTag(d)}</td>
-      <td style="font-size:11px;color:var(--muted)">${esc(m.ref||'—')}</td>
+  ${recent.length?`<div class="card" style="margin-top:14px"><div class="ch">🕒 Recent Movements <span style="font-size:11px;font-weight:400;color:var(--muted)">(last 6)</span></div>
+  <div class="tw"><table><thead><tr><th>Date</th><th>Type</th><th>Location</th><th>SKU</th><th class="r">Qty</th><th>Ref</th></tr></thead><tbody>
+    ${recent.map(m=>{const ty={IN:['📥','#1e40af'],OUT:['📤','#b91c1c'],TF:['🔄','#7c3aed'],ADJ:['⚖','#8b5cf6']}[m.type]||['•','#64748b'];return`<tr>
+      <td style="font-size:11px">${fD(m.date)}</td>
+      <td><span style="color:${ty[1]};font-weight:700;font-size:11px">${ty[0]} ${m.type}</span></td>
+      <td style="font-size:11px">${esc((lm[m.locId]||{}).name||m.locId||'—')}</td>
+      <td class="mono" style="font-size:11px">${esc(m.sku)}</td>
+      <td class="r" style="font-size:11px">${m.cases?m.cases+'cs ':''}${m.pcs?m.pcs+'pc':''}${m.adjQty?(m.adjQty>0?'+':'')+m.adjQty:''}</td>
+      <td style="font-size:11px;color:var(--muted)">${esc(m.ref||m.notes||'—')}</td>
     </tr>`;}).join('')}
   </tbody></table></div></div>`
-  :`<div class="card"><div class="cb" style="text-align:center;padding:40px;color:var(--muted)">
+  :`<div class="card" style="margin-top:14px"><div class="cb" style="text-align:center;padding:40px;color:var(--muted)">
     <div style="font-size:40px;margin-bottom:10px">📭</div>
     <div style="font-weight:700;margin-bottom:4px">No movements yet</div>
     <div style="font-size:12px;margin-bottom:16px">Start by setting opening balances and recording stock movements</div>
