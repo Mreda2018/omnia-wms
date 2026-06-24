@@ -417,7 +417,7 @@ async function loadFromDB(){
     ]);
     if(lR.data?.length) locs=lR.data.map(r=>({id:r.id,name:r.name,icon:r.icon||'📦',active:r.active!==false}));
     else locs=[...LOCS_DEF];
-    if(pR.data?.length) products=pR.data.map(r=>({id:r.id,sku:r.sku,name:r.name,cat:r.cat||'Other',brand:r.brand||'',ppc:r.ppc||1,reorder:r.reorder||0,cost:+r.cost||0,sell:+r.sell||0,sellPc:+r.sell_pc||0,expiry:r.expiry||'',shelfLife:r.shelf_life||0}));
+    if(pR.data?.length) products=pR.data.map(r=>({id:r.id,sku:r.sku,name:r.name,cat:r.cat||'Other',brand:r.brand||'',ppc:r.ppc||1,reorder:r.reorder||0,cost:+r.cost||0,sell:+r.sell||0,sellPc:+r.sell_pc||0,expiry:r.expiry||'',shelfLife:r.shelf_life||0,hsCode:r.hs_code||''}));
     else products=[...PRODS_DEF];
     movements=(mR.data||[]).map(r=>({id:r.id,date:r.date,locId:r.loc_id,sku:r.sku,type:r.type,cases:r.cases||0,pcs:r.pcs||0,batch:r.batch||'',expiry:r.expiry||'',party:r.party||'',ref:r.ref||'',notes:r.notes||'',adjQty:r.adj_qty||0,fromLoc:r.from_loc||'',toLoc:r.to_loc||'',driver:r.driver||'',createdBy:r.created_by||'',ts:r.ts||0}));
     openingBal=(oR.data||[]).map(r=>({locId:r.loc_id,sku:r.sku,cases:r.cases||0,pcs:r.pcs||0}));
@@ -831,7 +831,7 @@ async function dbDelMov(id){
 async function dbUpsertProd(p){
   if(!SB||useLocal){save();return;}
   await SB.from('products').upsert({id:p.id,sku:p.sku,name:p.name,cat:p.cat,brand:p.brand||null,
-    ppc:p.ppc,reorder:p.reorder,cost:p.cost,sell:p.sell||0,sell_pc:p.sellPc||0,expiry:p.expiry||null,shelf_life:p.shelfLife||0});
+    ppc:p.ppc,reorder:p.reorder,cost:p.cost,sell:p.sell||0,sell_pc:p.sellPc||0,expiry:p.expiry||null,shelf_life:p.shelfLife||0,hs_code:p.hsCode||null});
 }
 async function dbDelProd(id){
   if(!SB||useLocal){save();return;}
@@ -1882,13 +1882,14 @@ async function _saveProd(id){
   const sellPc=parseFloat(document.getElementById('p-sellpc')?.value)||0;
   const expiry=document.getElementById('p-expiry')?.value||'';
   const shelfLife=parseInt(document.getElementById('p-shelf')?.value)||0;
+  const hsCode=document.getElementById('p-hscode')?.value.trim()||'';
   if(!sku||!name){alert('SKU and Name are required');return;}
   if(id){
     const p=products.find(x=>x.id===id);
-    if(p){Object.assign(p,{sku,name,cat,ppc,reorder,cost,sell,sellPc,expiry,shelfLife});}
-    await dbUpsertProd(p||{id,sku,name,cat,ppc,reorder,cost,sell,sellPc,expiry,shelfLife});
+    if(p){Object.assign(p,{sku,name,cat,ppc,reorder,cost,sell,sellPc,expiry,shelfLife,hsCode});}
+    await dbUpsertProd(p||{id,sku,name,cat,ppc,reorder,cost,sell,sellPc,expiry,shelfLife,hsCode});
   }else{
-    const p={id:uid(),sku,name,cat,ppc,reorder,cost,sell,sellPc,expiry,shelfLife};
+    const p={id:uid(),sku,name,cat,ppc,reorder,cost,sell,sellPc,expiry,shelfLife,hsCode};
     products.push(p);
     await dbUpsertProd(p);
   }
@@ -2080,7 +2081,7 @@ function renderReport(locId){
       <div style="font-size:10px;color:#94a3b8;font-weight:400;margin-top:2px">Opening + Stock In − Stock Out + Adjustments = Closing</div>
     </div>
     <div class="tw"><table class="fixed"><thead><tr>
-      <th>SKU</th><th>Product</th><th>Cat</th><th class="r">PPC</th>
+      <th>SKU</th><th>Product</th><th>Cat</th><th>HS Code</th><th class="r">PPC</th>
       <th class="r">Opening</th><th class="r">+Stock In</th><th class="r">−Stock Out</th><th class="r">±Adj</th>
       <th class="r">Closing (pcs)</th><th class="r">Closing (cs+pcs)</th><th class="r">Value (AED)</th><th>Nearest Expiry</th><th>Status</th>
     </tr></thead><tbody>
@@ -2093,6 +2094,7 @@ function renderReport(locId){
           <td class="mono">${esc(p.sku)}</td>
           <td style="font-weight:600">${esc(p.name)}${dblWarn?` <span title="This product has BOTH an Opening Balance and Stock In entries — it may be double-counted. Use one method only: set Opening Balance to 0 and keep Stock In (recommended)." style="cursor:help;color:#d97706;font-weight:800">⚠</span>`:''}</td>
           <td><span style="background:#f1f5f9;padding:2px 6px;border-radius:5px;font-size:10px;font-weight:700">${esc(p.cat)}</span></td>
+          <td>${(p.hsCode||'').trim()?`<span class="mono" style="font-size:11px">${esc(p.hsCode)}</span>`:'<span title="Missing HS Code — needed for e-invoicing" style="color:#dc2626;font-weight:800;cursor:help">⚠ missing</span>'}</td>
           <td class="r">${ppc}</td>
           <td class="r"${dblWarn?' style="color:#d97706;font-weight:800"':''}>${ob}</td>
           <td class="r" style="color:#1e40af;font-weight:700">${si>0?'+'+si:'—'}</td>
@@ -2106,7 +2108,7 @@ function renderReport(locId){
         </tr>`;}).join('')}
     </tbody>
     <tfoot><tr class="tfoot">
-      <td colspan="4" class="b">GRAND TOTAL — ${products.length} SKUs · ${locs.length} Locations</td>
+      <td colspan="5" class="b">GRAND TOTAL — ${products.length} SKUs · ${locs.length} Locations</td>
       <td class="r b">${grandOB.toLocaleString()}</td>
       <td class="r" style="color:#1e40af;font-weight:800">+${grandSI.toLocaleString()}</td>
       <td class="r" style="color:var(--red);font-weight:800">-${grandSO.toLocaleString()}</td>
@@ -2233,12 +2235,18 @@ function openProdModal(id){
         <option ${p.cat==='🎁 Bundles'?'selected':''}>🎁 Bundles</option>
         <option ${p.cat==='Other'?'selected':''}>Other</option>
       </select></div>
-      <div class="fg"><label>PPC (Pieces / Case) *</label><input type="number" id="p-ppc" value="${p.ppc||24}" min="1"/>
-        <div class="fnote">Pieces per case / carton</div>
+      <div class="fg"><label>HS Code <span style="font-weight:400;text-transform:none;color:var(--muted)">(customs / e-invoice)</span></label><input id="p-hscode" value="${esc(p.hsCode||'')}" placeholder="e.g. 2201.10.00" maxlength="14"/>
+        <div class="fnote">Harmonized System code — required for UAE e-invoicing</div>
       </div>
     </div>
     <div class="frow f2">
+      <div class="fg"><label>PPC (Pieces / Case) *</label><input type="number" id="p-ppc" value="${p.ppc||24}" min="1"/>
+        <div class="fnote">Pieces per case / carton</div>
+      </div>
       <div class="fg"><label>Reorder Level (cases)</label><input type="number" id="p-reorder" value="${p.reorder||''}"/></div>
+    </div>
+    <div class="frow f2">
+      <div class="fg" style="display:none"></div>
       <div class="fg"><label>Cost Price (AED / piece)</label><input type="number" id="p-cost" value="${p.cost||''}" step="0.01"/></div>
       <div class="frow f2">
         <div class="fg"><label>💰 Case Price (AED)</label><input type="number" id="p-sell" value="${p.sell||''}" step="0.01" oninput="(()=>{const ppc=parseInt(document.getElementById('p-ppc').value)||1;const cs=parseFloat(this.value)||0;document.getElementById('p-sellpc').value=cs?(cs/ppc).toFixed(2):'';}).call(this)"/>
@@ -3785,7 +3793,7 @@ async function loadReturnsFromDB(){
   if(!SB)return;
   try{
     const{data}=await SB.from('returns').select('*').order('date',{ascending:false});
-    returns=(data||[]).map(r=>({id:r.id,grvNo:r.grv_no,date:r.date,origInvNo:r.orig_inv_no||'',customerId:r.customer_id||'',customerName:r.customer_name,branch:r.branch||'',trn:r.trn||'',reason:r.reason||'',locId:r.loc_id||'',items:r.items||[],subtotal:+r.subtotal||0,vat:+r.vat||0,total:+r.total||0,createdBy:r.created_by||'',ts:r.ts||0,cancelled:!!r.cancelled}));
+    returns=(data||[]).map(r=>({id:r.id,grvNo:r.grv_no,date:r.date,origInvNo:r.orig_inv_no||'',customerId:r.customer_id||'',customerName:r.customer_name,branch:r.branch||'',trn:r.trn||'',reason:r.reason||'',locId:r.loc_id||'',items:r.items||[],subtotal:+r.subtotal||0,vat:+r.vat||0,total:+r.total||0,createdBy:r.created_by||'',ts:r.ts||0,cancelled:!!r.cancelled,einvStatus:r.einv_status||'none',einvXml:r.einv_xml||'',einvUuid:r.einv_uuid||'',einvSubmittedAt:r.einv_submitted_at?new Date(r.einv_submitted_at).getTime():null}));
   }catch(e){console.error('returns load:',e);}
 }
 function nextGrvNo(){
@@ -3869,7 +3877,7 @@ function renderReturns(){
         <td style="font-size:11px;color:var(--muted)">${esc(r.reason||'—')}</td>
         <td class="r b" style="color:${r.cancelled?'#94a3b8':'#9a3412'};${r.cancelled?'text-decoration:line-through':''}">${fmtAED(r.total)}</td>
         <td style="font-size:11px;color:var(--g)">${esc(r.createdBy||'—')}</td>
-        <td style="white-space:nowrap">${r.cancelled?'<span class="tag" style="background:#f1f5f9;color:#64748b">✖ CANC.</span>':`<button class="btn bgh bsm" onclick="printReturn('${r.id}')">🖨</button>${canEditSales()?` <button class="btn bb bsm" onclick="editReturn('${r.id}')">✏</button> <button class="btn br bsm" onclick="cancelReturn('${r.id}')">✖</button>`:''}`}</td>
+        <td style="white-space:nowrap">${r.cancelled?'<span class="tag" style="background:#f1f5f9;color:#64748b">✖ CANC.</span>':`<button class="btn bgh bsm" onclick="printReturn('${r.id}')">🖨</button> ${einvStatusOf(r)==='none'?`<button class="btn bsm" style="background:#ecfdf5;color:#065f46" onclick="queueCreditNote('${r.id}')" title="Queue Credit Note for e-Invoicing">➕📋 CN</button>`:`<span title="Credit Note e-invoice status" style="font-size:9px">${einvBadge(r)}</span>`}${canEditSales()?` <button class="btn bb bsm" onclick="editReturn('${r.id}')">✏</button> <button class="btn br bsm" onclick="cancelReturn('${r.id}')">✖</button>`:''}`}</td>
       </tr>`).join('')}
     </tbody></table></div>`:`<div class="cb" style="text-align:center;color:var(--muted);padding:30px">${grvQ||grvFrom||grvTo?'No returns match your search':'No returns yet'}</div>`}
   </div>`;
@@ -4192,7 +4200,7 @@ async function pushAllToDB(){
   try{
     // products & locations & opening via existing helpers if available; else raw upsert
     for(const l of locs){await SB.from('locations').upsert({id:l.id,name:l.name,icon:l.icon||'📦',active:l.active!==false});}
-    for(const p of products){await SB.from('products').upsert({id:p.id,sku:p.sku,name:p.name,cat:p.cat,brand:p.brand||null,ppc:p.ppc,reorder:p.reorder,cost:p.cost,sell:p.sell||0,sell_pc:p.sellPc||0,expiry:p.expiry||null,shelf_life:p.shelfLife||0});}
+    for(const p of products){await SB.from('products').upsert({id:p.id,sku:p.sku,name:p.name,cat:p.cat,brand:p.brand||null,ppc:p.ppc,reorder:p.reorder,cost:p.cost,sell:p.sell||0,sell_pc:p.sellPc||0,expiry:p.expiry||null,shelf_life:p.shelfLife||0,hs_code:p.hsCode||null});}
     await SB.from('movements').upsert(movements.map(m=>({id:m.id,date:m.date,loc_id:m.locId,sku:m.sku,type:m.type,cases:m.cases||0,pcs:m.pcs||0,batch:m.batch||null,expiry:m.expiry||null,party:m.party||null,ref:m.ref||null,notes:m.notes||null,adj_qty:m.adjQty||0,from_loc:m.fromLoc||null,to_loc:m.toLoc||null,driver:m.driver||null,created_by:m.createdBy||null,ts:m.ts})));
     for(const c of customers){await dbUpsertCust(c);}
     if(invoices.length)await SB.from('invoices').upsert(invoices.map(i=>({id:i.id,inv_no:i.invNo,date:i.date,customer_id:i.customerId||null,customer_name:i.customerName,customer_type:i.customerType||null,branch:i.branch||null,address:i.address||null,emirate:i.emirate||null,trn:i.trn||null,ref:i.ref||null,loc_id:i.locId||null,payment_status:i.payStatus||'unpaid',paid_at:i.paidAt?new Date(i.paidAt).toISOString():null,cancelled:!!i.cancelled,items:i.items,subtotal:i.subtotal,discount_total:i.discountTotal,vat:i.vat,total:i.total,created_by:i.createdBy,ts:i.ts})));
@@ -4726,6 +4734,8 @@ function validateEInvoice(inv){
     if(!it.name)errs.push('Line '+(i+1)+': missing description');
     if(!(it.qty>0))errs.push('Line '+(i+1)+': quantity must be > 0');
     if(it.price==null||isNaN(+it.price))errs.push('Line '+(i+1)+': invalid price');
+    const prod=products.find(pr=>pr.sku===it.sku);
+    if(prod&&!(prod.hsCode||'').trim())errs.push('Line '+(i+1)+' ('+(it.name||it.sku)+'): missing HS Code — add it in Products');
   });
   if(inv.total==null||isNaN(+inv.total))errs.push('Invalid total amount');
   return errs;
@@ -4751,13 +4761,16 @@ function buildEInvoiceXML(inv){
     const lineTax=+(lineNet*rate/100).toFixed(2);
     taxableByCat[cat]=(taxableByCat[cat]||0)+lineNet;
     taxByCat[cat]=(taxByCat[cat]||0)+lineTax;
+    const prod=products.find(pr=>pr.sku===it.sku)||{};
+    const hs=(prod.hsCode||'').trim();
+    const hsXML=hs?`\n      <cac:CommodityClassification><cbc:ItemClassificationCode listID="HS">${xmlEsc(hs)}</cbc:ItemClassificationCode></cac:CommodityClassification>`:'';
     lineXML+=`
   <cac:InvoiceLine>
     <cbc:ID>${i+1}</cbc:ID>
     <cbc:InvoicedQuantity unitCode="EA">${d2(qty)}</cbc:InvoicedQuantity>
     <cbc:LineExtensionAmount currencyID="${cur}">${d2(lineNet)}</cbc:LineExtensionAmount>
     <cac:Item>
-      <cbc:Name>${xmlEsc(it.name)}</cbc:Name>
+      <cbc:Name>${xmlEsc(it.name)}</cbc:Name>${hsXML}
       <cac:ClassifiedTaxCategory>
         <cbc:ID>${cat}</cbc:ID>
         <cbc:Percent>${d2(rate)}</cbc:Percent>
@@ -4912,6 +4925,58 @@ async function unqueueEInvoice(id){
   inv.einvStatus='none';await dbUpdateInvoiceEInv(inv);save2();await logAction('EINVOICE_UNQUEUED',inv.invNo);render();
 }
 
+// Build a temporary invoice-shaped object from a GRV so buildEInvoiceXML can emit a Credit Note (typeCode 381)
+function grvToCreditDoc(r){
+  return {id:r.id,invNo:r.grvNo,date:r.date,customerId:r.customerId,customerName:r.customerName,
+    trn:r.trn,items:r.items,subtotal:r.subtotal,vat:r.vat,total:r.total,
+    __credit:true,__origInvNo:r.origInvNo||''};
+}
+// Persist e-invoice fields on a GRV (returns table reuses einv_* columns)
+async function dbUpdateGrvEInv(r){
+  if(!SB||useLocal){saveRet();return;}
+  try{await SB.from('returns').update({einv_status:r.einvStatus||null,einv_xml:r.einvXml||null,einv_uuid:r.einvUuid||null,einv_submitted_at:r.einvSubmittedAt?new Date(r.einvSubmittedAt).toISOString():null}).eq('id',r.id);}catch(e){console.error('grv einv update:',e);}
+}
+// Queue a GRV as a Credit Note for e-invoicing
+async function queueCreditNote(id){
+  const r=returns.find(x=>x.id===id);if(!r)return;
+  if(r.cancelled){alert('Cancelled GRVs cannot be e-invoiced.');return;}
+  const doc=grvToCreditDoc(r);
+  const errs=validateEInvoice(doc);
+  if(errs.length){alert('⚠ Cannot queue Credit Note — fix these first:\n\n• '+errs.join('\n• '));return;}
+  r.einvStatus='queued';r.einvXml=buildEInvoiceXML(doc);r.einvQueuedAt=Date.now();r.__isCreditNote=true;
+  await dbUpdateGrvEInv(r);saveRet();
+  await logAction('CREDITNOTE_QUEUED',r.grvNo+(r.origInvNo?' (against '+r.origInvNo+')':''));
+  render();
+}
+async function unqueueCreditNote(id){
+  const r=returns.find(x=>x.id===id);if(!r)return;
+  if(['sent','accepted'].includes(r.einvStatus)){alert('Already submitted — cannot remove.');return;}
+  r.einvStatus='none';await dbUpdateGrvEInv(r);saveRet();await logAction('CREDITNOTE_UNQUEUED',r.grvNo);render();
+}
+async function sendCreditNote(id){
+  const r=returns.find(x=>x.id===id);if(!r)return;
+  if(!['queued','failed'].includes(einvStatusOf(r))){alert('Only queued or failed credit notes can be sent.');return;}
+  r.einvStatus='sending';render();
+  const doc=grvToCreditDoc(r);doc.einvXml=r.einvXml;
+  const res=await dispatchToASP(doc);
+  if(res.ok){
+    r.einvStatus='accepted';r.einvUuid=res.uuid||'';if(res.signedXml)r.einvXml=res.signedXml;r.einvSubmittedAt=Date.now();
+    await logAction('CREDITNOTE_ACCEPTED',r.grvNo+(res.uuid?' · UUID '+res.uuid:''));
+  }else if(res.simulated){
+    r.einvStatus='queued';alert('ℹ️ '+res.message);
+  }else{
+    r.einvStatus='failed';r.einvError=res.message||'Unknown error';
+    await logAction('CREDITNOTE_FAILED',r.grvNo+' — '+(res.message||''));
+  }
+  await dbUpdateGrvEInv(r);saveRet();render();
+}
+function downloadCreditNoteXML(id){
+  const r=returns.find(x=>x.id===id);if(!r)return;
+  const xml=r.einvXml||buildEInvoiceXML(grvToCreditDoc(r));
+  const blob=new Blob([xml],{type:'application/xml'});const url=URL.createObjectURL(blob);
+  const a=document.createElement('a');a.href=url;a.download='CreditNote-'+(r.grvNo||r.id)+'.xml';a.click();URL.revokeObjectURL(url);
+}
+
 // ── ASP DISPATCH ADAPTER (Phase 2 connection point) ──
 // When an ASP is chosen, this is the ONLY function that needs real wiring.
 // It must call a Supabase Edge Function (server-side) that holds the ASP API key.
@@ -4969,13 +5034,22 @@ let eqFilter='all';
 function renderEInvoiceQueue(){
   const counts={queued:0,sending:0,sent:0,accepted:0,failed:0,none:0};
   invoices.filter(i=>!i.cancelled).forEach(i=>{counts[einvStatusOf(i)]=(counts[einvStatusOf(i)]||0)+1;});
+  // include queued credit notes (GRVs) in counts
+  (typeof returns!=='undefined'?returns:[]).filter(r=>!r.cancelled&&einvStatusOf(r)!=='none').forEach(r=>{counts[einvStatusOf(r)]=(counts[einvStatusOf(r)]||0)+1;});
   const pending=counts.queued+counts.failed;
-  const list=invoices.filter(i=>!i.cancelled).filter(i=>{
+  const invList=invoices.filter(i=>!i.cancelled).filter(i=>{
     const s=einvStatusOf(i);
     if(eqFilter==='all')return s!=='none';
     if(eqFilter==='pending')return s==='queued'||s==='failed';
     return s===eqFilter;
-  }).sort((a,b)=>(b.einvQueuedAt||b.ts||0)-(a.einvQueuedAt||a.ts||0));
+  });
+  const cnList=(typeof returns!=='undefined'?returns:[]).filter(r=>!r.cancelled&&einvStatusOf(r)!=='none').filter(r=>{
+    const s=einvStatusOf(r);
+    if(eqFilter==='all')return true;
+    if(eqFilter==='pending')return s==='queued'||s==='failed';
+    return s===eqFilter;
+  }).map(r=>({...r,__isCreditNote:true,invNo:r.grvNo,customerName:r.customerName,total:r.total}));
+  const list=[...invList,...cnList].sort((a,b)=>(b.einvQueuedAt||b.ts||0)-(a.einvQueuedAt||a.ts||0));
   const notQueued=invoices.filter(i=>!i.cancelled&&einvStatusOf(i)==='none');
 
   const chip=(k,lbl)=>`<button class="btn bsm" style="background:${eqFilter===k?'var(--g)':'#fff'};color:${eqFilter===k?'#fff':'var(--ink)'};border:1px solid var(--border)" onclick="eqFilter='${k}';render()">${lbl}</button>`;
@@ -4996,16 +5070,16 @@ function renderEInvoiceQueue(){
   </div></div>
   <div class="card"><div class="ch">E-Invoice Queue (${list.length})</div>
     ${list.length?`<div class="tw"><table><thead><tr><th>Invoice #</th><th>Date</th><th>Customer</th><th class="r">Total</th><th>E-Invoice Status</th><th>UUID / Error</th><th></th></tr></thead><tbody>
-      ${list.map(inv=>{const s=einvStatusOf(inv);return`<tr>
-        <td class="mono" style="font-weight:700">${esc(inv.invNo)}</td>
+      ${list.map(inv=>{const s=einvStatusOf(inv);const isCN=inv.__isCreditNote===true;return`<tr>
+        <td class="mono" style="font-weight:700">${esc(inv.invNo)}${isCN?' <span class="tag" style="background:#fef3c7;color:#92400e;font-size:8px">CREDIT NOTE</span>':''}</td>
         <td style="font-size:11px">${fD(inv.date)}</td>
         <td style="font-weight:600">${esc(inv.customerName)}</td>
         <td class="r b">${fmtAED(inv.total)}</td>
         <td>${einvBadge(inv)}</td>
         <td style="font-size:10px;color:${s==='failed'?'#b91c1c':'var(--muted)'};max-width:200px">${s==='accepted'?esc(inv.einvUuid||'—'):s==='failed'?esc(inv.einvError||'error'):'—'}</td>
         <td style="white-space:nowrap">
-          <button class="btn bsm" style="background:#eef2ff;color:#4338ca" onclick="downloadEInvoiceXML('${inv.id}')" title="View / download XML">📋</button>
-          ${s==='queued'||s==='failed'?`<button class="btn bg bsm" onclick="sendEInvoice('${inv.id}')" title="Send to ASP">📤</button> <button class="btn bgh bsm" onclick="unqueueEInvoice('${inv.id}')" title="Remove from queue">✖</button>`:''}
+          <button class="btn bsm" style="background:#eef2ff;color:#4338ca" onclick="${isCN?`downloadCreditNoteXML('${inv.id}')`:`downloadEInvoiceXML('${inv.id}')`}" title="View / download XML">📋</button>
+          ${s==='queued'||s==='failed'?`<button class="btn bg bsm" onclick="${isCN?`sendCreditNote('${inv.id}')`:`sendEInvoice('${inv.id}')`}" title="Send to ASP">📤</button> ${isCN?`<button class="btn bgh bsm" onclick="unqueueCreditNote('${inv.id}')" title="Remove from queue">✖</button>`:`<button class="btn bgh bsm" onclick="unqueueEInvoice('${inv.id}')" title="Remove from queue">✖</button>`}`:''}
           ${s==='accepted'?`<span style="font-size:10px;color:#15803d">submitted</span>`:''}
         </td>
       </tr>`;}).join('')}
