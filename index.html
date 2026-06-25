@@ -308,6 +308,8 @@ input:focus,select:focus,textarea:focus{border-color:var(--g);background:var(--w
     <div class="ni" id="nav-rep-all" onclick="go('rep-all')"><span class="ic">📊</span>Overall Stock Report</div>
     <div class="ni" id="nav-outrep" onclick="go('outrep')"><span class="ic">📤</span>Stock Out Report</div>
     <div class="ni" id="nav-inrep" onclick="go('inrep')"><span class="ic">📥</span>Stock In Report</div>
+    <div class="ni" id="nav-adjreport" onclick="go('adjreport')"><span class="ic">⚖</span>Adjustment Report</div>
+    <div class="ni" id="nav-tfreport" onclick="go('tfreport')"><span class="ic">🔄</span>Transfer Report</div>
     <div id="loc-nav-slot"></div>
     <div class="ni" id="nav-expiry" onclick="go('expiry')"><span class="ic">⏰</span>Expiry Report <span class="nb" id="exp-nb" style="display:none">0</span></div>
     <div class="ns">Master Data</div>
@@ -483,15 +485,15 @@ let currentUser=null; // {email, name, role}
 const DEFAULT_ROLES={
   admin:'all',
   // 📦 المخزن — Inventory: stock operations + reports + products only
-  inventory:['dashboard','in','out','transfer','adjust','log','rep-all','outrep','inrep','expiry','products','opening','locations','suppliers'],
+  inventory:['dashboard','in','out','transfer','adjust','log','rep-all','outrep','inrep','adjreport','tfreport','expiry','products','opening','locations','suppliers'],
   // 🧾 المبيعات — Sales: invoices, customers, payments, returns, delivery
   sales:['dashboard','out','rep-all','outrep','invoices','customers','sales','returns','delivery','payments','statement','expenses','approvals','einvoice'],
   // 🧮 الحسابات — Accountant: all financial/accounting modules + read sales
   accountant:['dashboard','rep-all','invoices','customers','sales','payments','statement','cash','bank','loans','suppliers','expenses','assets','accounting','bookkeeping','finstate','einvoice'],
   // 🛡️ الإدارة — Management: everything except user management
-  management:['dashboard','in','out','transfer','adjust','log','rep-all','outrep','inrep','expiry','products','opening','locations','invoices','customers','sales','returns','delivery','payments','statement','cash','bank','loans','suppliers','expenses','assets','accounting','bookkeeping','finstate','approvals','einvoice','audit'],
+  management:['dashboard','in','out','transfer','adjust','log','rep-all','outrep','inrep','adjreport','tfreport','expiry','products','opening','locations','invoices','customers','sales','returns','delivery','payments','statement','cash','bank','loans','suppliers','expenses','assets','accounting','bookkeeping','finstate','approvals','einvoice','audit'],
   // 👁 Viewer — read-only of everything except users
-  viewer:['dashboard','in','out','transfer','adjust','log','rep-all','outrep','inrep','expiry','products','opening','locations','invoices','customers','sales','returns','delivery','payments','statement','cash','bank','loans','suppliers','expenses','assets','accounting','bookkeeping','finstate','approvals','einvoice','audit'],
+  viewer:['dashboard','in','out','transfer','adjust','log','rep-all','outrep','inrep','adjreport','tfreport','expiry','products','opening','locations','invoices','customers','sales','returns','delivery','payments','statement','cash','bank','loans','suppliers','expenses','assets','accounting','bookkeeping','finstate','approvals','einvoice','audit'],
 };
 // Admin-customised role pages loaded from Supabase (overrides defaults). admin always = 'all'.
 let roleOverrides={};
@@ -983,6 +985,8 @@ const pageInfo={
   expiry:['Expiry Report','Track batches nearing expiry or expired'],
   outrep:['Stock Out Report','Who took what, when, with which expiry batch'],
   inrep:['Stock In Report','Received stock — supplier, batches & expiry details'],
+  adjreport:['Stock Adjustment Report','All stock corrections with reason, quantity & value impact'],
+  tfreport:['Stock Transfer Report','Stock moved between locations, by route & product'],
   invoices:['Tax Invoices','Create VAT invoices for customers'],
   customers:['Customers','Manage customer database & pricing'],
   sales:['Sales Report','Sales analytics with period comparison'],
@@ -1229,7 +1233,7 @@ function render(){
   try{
     renderLocNav();
     if(typeof updateApprBadge==='function')updateApprBadge();
-    const map={dashboard:renderDashboard,in:renderIn,out:renderOut,transfer:renderTransfer,adjust:renderAdjust,log:renderLog,expiry:renderExpiry,products:renderProducts,opening:renderOpening,locations:renderLocations,invoices:renderInvoices,customers:renderCustomers,sales:renderSales,returns:renderReturns,delivery:renderDelivery,payments:renderPayments,statement:renderStatement,cash:renderCash,suppliers:renderSuppliers,expenses:renderExpenses,assets:renderAssets,accounting:renderAccounting,bookkeeping:renderBookkeeping,finstate:renderFinStatements,einvoice:renderEInvoiceQueue,approvals:renderApprovals,audit:renderAudit,users:renderUsers,datausage:renderDataUsage,bank:renderBank,loans:renderLoans,outrep:renderOutReport,inrep:renderInReport};
+    const map={dashboard:renderDashboard,in:renderIn,out:renderOut,transfer:renderTransfer,adjust:renderAdjust,log:renderLog,expiry:renderExpiry,products:renderProducts,opening:renderOpening,locations:renderLocations,invoices:renderInvoices,customers:renderCustomers,sales:renderSales,returns:renderReturns,delivery:renderDelivery,payments:renderPayments,statement:renderStatement,cash:renderCash,suppliers:renderSuppliers,expenses:renderExpenses,assets:renderAssets,accounting:renderAccounting,bookkeeping:renderBookkeeping,finstate:renderFinStatements,einvoice:renderEInvoiceQueue,approvals:renderApprovals,audit:renderAudit,users:renderUsers,datausage:renderDataUsage,bank:renderBank,loans:renderLoans,outrep:renderOutReport,inrep:renderInReport,adjreport:renderAdjReport,tfreport:renderTransferReport};
     if(curPage.startsWith('rep-'))renderReport(curPage==='rep-all'?null:curPage.replace('rep-',''));
     else(map[curPage]||renderDashboard)();
     updateExpBadge();
@@ -1333,6 +1337,27 @@ function renderDashboard(){
   const monthLabel=now.toLocaleDateString('en-GB',{month:'long',year:'numeric'});
   const aed=n=>'AED '+(+n||0).toLocaleString('en-AE',{maximumFractionDigits:0});
 
+  // ── VAT (current month) & Corporate Tax (year-to-date estimate) ──
+  const pm0=prodMap();
+  const cogsFor=(invList)=>{let c=0;invList.forEach(i=>(i.items||[]).forEach(it=>{const p=pm0[it.sku];if(p){const pcs=it.unit==='case'?(it.qty*(p.ppc||1)):it.qty;c+=(+p.cost||0)*pcs;}}));return c;};
+  // VAT this month: output (invoices) − input (expenses with VAT)
+  const moInvs=(typeof invoices!=='undefined'?invoices:[]).filter(i=>!i.cancelled&&i.date&&new Date(i.date).getFullYear()===thisMo.y&&new Date(i.date).getMonth()===thisMo.m);
+  const outputVat=moInvs.reduce((a,i)=>a+(+i.vat||0),0);
+  const inputVat=(typeof expenses!=='undefined'?expenses:[]).filter(e=>apprOK(e)&&e.hasVat&&e.date&&new Date(e.date).getFullYear()===thisMo.y&&new Date(e.date).getMonth()===thisMo.m).reduce((a,e)=>a+(+e.vatAmount||0),0);
+  const netVat=outputVat-inputVat;
+  // Corporate tax YTD estimate (9% above 375k)
+  const yStart=new Date(now.getFullYear(),0,1),yEnd=now;
+  const inY=d=>{if(!d)return false;const dt=new Date(d);return dt>=yStart&&dt<=yEnd;};
+  const ytdInvs=(typeof invoices!=='undefined'?invoices:[]).filter(i=>!i.cancelled&&inY(i.date));
+  const ytdRets=(typeof returns!=='undefined'?returns:[]).filter(r=>!r.cancelled&&inY(r.date));
+  const ytdRev=ytdInvs.reduce((a,i)=>a+(+i.subtotal||0),0)-ytdRets.reduce((a,r)=>a+(+r.subtotal||0),0);
+  const ytdCogs=cogsFor(ytdInvs);
+  const ytdPetty=(typeof pettyCash!=='undefined'?pettyCash:[]).filter(e=>isApprovedRec(e)&&e.type==='out'&&inY(e.date)).reduce((a,e)=>a+e.amount,0);
+  const ytdExpMod=(typeof expenses!=='undefined'?expenses:[]).filter(e=>apprOK(e)&&inY(e.date)).reduce((a,e)=>a+(+e.net||0),0);
+  const ytdNetProfit=ytdRev-ytdCogs-ytdPetty-ytdExpMod;
+  const ctaxThreshold=375000;
+  const ctaxEst=Math.max(0,ytdNetProfit-ctaxThreshold)*0.09;
+
   // ── KPI hero cards ──
   const kpi=(icon,label,val,sub,color,onclick)=>`<div class="dkpi"${onclick?` onclick="${onclick}" style="cursor:pointer"`:''}>
     <div class="dkpi-ic" style="background:${color}22;color:${color}">${icon}</div>
@@ -1344,6 +1369,10 @@ function renderDashboard(){
     if(canAccess('payments')){heroCards+=kpi('💵','Collected · '+months[5].label,aed(monthReceipts),'payments received','#0369a1');
       heroCards+=kpi('⏳','Receivables',aed(receivables),'outstanding from customers','#d97706');}
     if(canAccess('expenses'))heroCards+=kpi('💸','Expenses · '+months[5].label,aed(monthExp),'this month','#dc2626');
+    if(canAccess('accounting')){
+      heroCards+=kpi('🧮','Net VAT · '+months[5].label,aed(netVat),(netVat>=0?'payable to FTA':'reclaimable'),netVat>=0?'#7c3aed':'#0891b2',"go('accounting')");
+      heroCards+=kpi('🏛️','Corporate Tax · YTD',aed(ctaxEst),'est. 9% above 375k','#b91c1c',"go('accounting')");
+    }
   }
   heroCards+=kpi('💰','Stock Value',aed(totalVal),totalSkus+' SKUs · '+totalPcs.toLocaleString()+' pcs','#3b82f6');
   if(!fin){heroCards+=kpi('📦','Total Stock',totalPcs.toLocaleString()+' pcs','across '+locs.length+' locations','#0c8a6e');
@@ -1984,6 +2013,112 @@ function delProd(id){
 }
 
 // ── MOVEMENTS LOG ────────────────────────────────
+// ── STOCK ADJUSTMENT REPORT ──
+function renderAdjReport(){
+  const lm=locMap(),pm=prodMap();
+  const from=document.getElementById('adjr-from')?.value||window.__adjrFrom||'';
+  const to=document.getElementById('adjr-to')?.value||window.__adjrTo||'';
+  window.__adjrFrom=from;window.__adjrTo=to;
+  const inR=d=>(!from||d>=from)&&(!to||d<=to);
+  let adjs=movements.filter(m=>m.type==='ADJ'&&inR(m.date)).sort((a,b)=>new Date(b.date)-new Date(a.date)||b.ts-a.ts);
+  const totalPos=adjs.filter(m=>m.adjQty>0).reduce((a,m)=>a+m.adjQty,0);
+  const totalNeg=adjs.filter(m=>m.adjQty<0).reduce((a,m)=>a+Math.abs(m.adjQty),0);
+  const valImpact=adjs.reduce((a,m)=>{const p=pm[m.sku]||{};return a+(m.adjQty*(p.cost||0));},0);
+  document.getElementById('content').innerHTML=`
+  <div class="card no-print" style="margin-bottom:14px"><div class="cb" style="display:flex;gap:10px;align-items:end;flex-wrap:wrap">
+    <div class="fg" style="margin:0"><label>From</label><input type="date" id="adjr-from" value="${from}" onchange="renderAdjReport()"/></div>
+    <div class="fg" style="margin:0"><label>To</label><input type="date" id="adjr-to" value="${to}" onchange="renderAdjReport()"/></div>
+    <button class="btn bgh bsm" onclick="(()=>{const n=new Date();window.__adjrFrom=new Date(n.getFullYear(),n.getMonth(),1).toISOString().split('T')[0];window.__adjrTo=new Date(n.getFullYear(),n.getMonth()+1,0).toISOString().split('T')[0];renderAdjReport();})()">This Month</button>
+    <div style="flex:1"></div>
+    <button class="btn bd bsm" onclick="exportAdjCSV()">⬇ CSV</button>
+    <button class="btn bd bsm" onclick="window.print()">🖨 Print</button>
+  </div></div>
+  <div class="dash-hero" style="margin-bottom:14px">
+    <div class="dkpi"><div class="dkpi-ic" style="background:#8b5cf622;color:#8b5cf6">⚖</div><div style="flex:1"><div class="dkpi-l">Total Adjustments</div><div class="dkpi-v">${adjs.length}</div><div class="dkpi-s">entries in period</div></div></div>
+    <div class="dkpi"><div class="dkpi-ic" style="background:#16a34a22;color:#16a34a">⊕</div><div style="flex:1"><div class="dkpi-l">Added (pcs)</div><div class="dkpi-v" style="color:#16a34a">+${totalPos.toLocaleString()}</div><div class="dkpi-s">stock increases</div></div></div>
+    <div class="dkpi"><div class="dkpi-ic" style="background:#dc262622;color:#dc2626">⊖</div><div style="flex:1"><div class="dkpi-l">Removed (pcs)</div><div class="dkpi-v" style="color:#dc2626">−${totalNeg.toLocaleString()}</div><div class="dkpi-s">stock decreases</div></div></div>
+    <div class="dkpi"><div class="dkpi-ic" style="background:${valImpact>=0?'#16a34a':'#dc2626'}22;color:${valImpact>=0?'#16a34a':'#dc2626'}">💰</div><div style="flex:1"><div class="dkpi-l">Value Impact</div><div class="dkpi-v" style="color:${valImpact>=0?'#16a34a':'#dc2626'}">${valImpact>=0?'+':'−'}AED ${Math.abs(valImpact).toLocaleString('en-AE',{maximumFractionDigits:0})}</div><div class="dkpi-s">at cost price</div></div></div>
+  </div>
+  <div class="card"><div class="ch">⚖ Stock Adjustment Report ${from||to?`<span style="font-size:11px;font-weight:400;color:var(--muted)">— ${from?fD(from):'start'} to ${to?fD(to):'now'}</span>`:''}</div>
+    ${adjs.length?`<div class="tw"><table><thead><tr><th>Date</th><th>Location</th><th>SKU</th><th>Product</th><th class="r">Adjustment</th><th class="r">Value</th><th>Reason / Ref</th><th>By</th></tr></thead><tbody>
+      ${adjs.map(m=>{const p=pm[m.sku]||{};const v=m.adjQty*(p.cost||0);return`<tr>
+        <td style="font-size:11px">${fD(m.date)}</td>
+        <td style="font-size:11px">${esc((lm[m.locId]||{}).name||'—')}</td>
+        <td class="mono" style="font-size:11px">${esc(m.sku)}</td>
+        <td style="font-size:11px">${esc(p.name||'—')}</td>
+        <td class="r b" style="color:${m.adjQty>=0?'#16a34a':'#dc2626'}">${m.adjQty>=0?'⊕ +':'⊖ −'}${Math.abs(m.adjQty)}</td>
+        <td class="r" style="color:${v>=0?'#16a34a':'#dc2626'};font-size:11px">${v>=0?'+':'−'}${Math.abs(v).toLocaleString('en-AE',{maximumFractionDigits:0})}</td>
+        <td style="font-size:11px;color:var(--muted)">${esc(m.ref||m.notes||'—')}</td>
+        <td style="font-size:11px;color:var(--g);font-weight:600">${esc(m.createdBy||'—')}</td>
+      </tr>`;}).join('')}
+    </tbody></table></div>`:`<div class="cb" style="text-align:center;padding:40px;color:var(--muted)">No stock adjustments in this period</div>`}
+  </div>`;
+}
+function exportAdjCSV(){
+  const lm=locMap(),pm=prodMap();const from=window.__adjrFrom||'',to=window.__adjrTo||'';
+  const inR=d=>(!from||d>=from)&&(!to||d<=to);
+  const adjs=movements.filter(m=>m.type==='ADJ'&&inR(m.date)).sort((a,b)=>new Date(b.date)-new Date(a.date));
+  const header=['Date','Location','SKU','Product','Adjustment (pcs)','Value (AED)','Reason/Ref','By'];const rows=[];
+  adjs.forEach(m=>{const p=pm[m.sku]||{};rows.push([m.date,(lm[m.locId]||{}).name||'',m.sku,p.name||'',m.adjQty,(m.adjQty*(p.cost||0)).toFixed(2),m.ref||m.notes||'',m.createdBy||'']);});
+  dlCSV(header,rows,'stock-adjustments-'+(from||'all'));
+}
+
+// ── STOCK TRANSFER REPORT ──
+function renderTransferReport(){
+  const lm=locMap(),pm=prodMap();
+  const from=document.getElementById('tfr-from')?.value||window.__tfrFrom||'';
+  const to=document.getElementById('tfr-to')?.value||window.__tfrTo||'';
+  window.__tfrFrom=from;window.__tfrTo=to;
+  const inR=d=>(!from||d>=from)&&(!to||d<=to);
+  let tfs=movements.filter(m=>m.type==='TF'&&inR(m.date)).sort((a,b)=>new Date(b.date)-new Date(a.date)||b.ts-a.ts);
+  const totalPcs=tfs.reduce((a,m)=>{const ppc=getPPC(m.sku);return a+((m.cases*ppc)+(+m.pcs||0));},0);
+  const totalVal=tfs.reduce((a,m)=>{const p=pm[m.sku]||{};const ppc=getPPC(m.sku);return a+(((m.cases*ppc)+(+m.pcs||0))*(p.cost||0));},0);
+  // group by route
+  const routes={};
+  tfs.forEach(m=>{const k=((lm[m.fromLoc]||{}).name||'?')+' → '+((lm[m.toLoc]||{}).name||'?');routes[k]=(routes[k]||0)+1;});
+  const routeBars=Object.entries(routes).map(([k,v],i)=>({label:k,value:v,color:['#7c3aed','#3b82f6','#14b8a6','#f59e0b','#ec4899'][i%5]})).sort((a,b)=>b.value-a.value);
+  document.getElementById('content').innerHTML=`
+  <div class="card no-print" style="margin-bottom:14px"><div class="cb" style="display:flex;gap:10px;align-items:end;flex-wrap:wrap">
+    <div class="fg" style="margin:0"><label>From</label><input type="date" id="tfr-from" value="${from}" onchange="renderTransferReport()"/></div>
+    <div class="fg" style="margin:0"><label>To</label><input type="date" id="tfr-to" value="${to}" onchange="renderTransferReport()"/></div>
+    <button class="btn bgh bsm" onclick="(()=>{const n=new Date();window.__tfrFrom=new Date(n.getFullYear(),n.getMonth(),1).toISOString().split('T')[0];window.__tfrTo=new Date(n.getFullYear(),n.getMonth()+1,0).toISOString().split('T')[0];renderTransferReport();})()">This Month</button>
+    <div style="flex:1"></div>
+    <button class="btn bd bsm" onclick="exportTfCSV()">⬇ CSV</button>
+    <button class="btn bd bsm" onclick="window.print()">🖨 Print</button>
+  </div></div>
+  <div class="dash-hero" style="margin-bottom:14px">
+    <div class="dkpi"><div class="dkpi-ic" style="background:#7c3aed22;color:#7c3aed">🔄</div><div style="flex:1"><div class="dkpi-l">Total Transfers</div><div class="dkpi-v">${tfs.length}</div><div class="dkpi-s">moves in period</div></div></div>
+    <div class="dkpi"><div class="dkpi-ic" style="background:#3b82f622;color:#3b82f6">📦</div><div style="flex:1"><div class="dkpi-l">Pieces Moved</div><div class="dkpi-v">${totalPcs.toLocaleString()}</div><div class="dkpi-s">total quantity</div></div></div>
+    <div class="dkpi"><div class="dkpi-ic" style="background:#16a34a22;color:#16a34a">💰</div><div style="flex:1"><div class="dkpi-l">Value Moved</div><div class="dkpi-v">AED ${totalVal.toLocaleString('en-AE',{maximumFractionDigits:0})}</div><div class="dkpi-s">at cost price</div></div></div>
+  </div>
+  ${routeBars.length?`<div class="card" style="margin-bottom:14px"><div class="ch">🛣 Transfers by Route</div><div class="cb">${svgBars(routeBars,{})}</div></div>`:''}
+  <div class="card"><div class="ch">🔄 Stock Transfer Report ${from||to?`<span style="font-size:11px;font-weight:400;color:var(--muted)">— ${from?fD(from):'start'} to ${to?fD(to):'now'}</span>`:''}</div>
+    ${tfs.length?`<div class="tw"><table><thead><tr><th>Date</th><th>From</th><th>To</th><th>SKU</th><th>Product</th><th class="r">Cases</th><th class="r">Pcs</th><th class="r">Total Pcs</th><th>Batch</th><th>Expiry</th><th>By</th></tr></thead><tbody>
+      ${tfs.map(m=>{const p=pm[m.sku]||{};const ppc=getPPC(m.sku);const tot=(m.cases*ppc)+(+m.pcs||0);const d=m.expiry?daysUntilExpiry(m.expiry):null;return`<tr>
+        <td style="font-size:11px">${fD(m.date)}</td>
+        <td style="font-size:11px"><span class="tag" style="background:#fef2f2;color:#b91c1c">${esc((lm[m.fromLoc]||{}).name||'—')}</span></td>
+        <td style="font-size:11px"><span class="tag" style="background:#f0fdf4;color:#166534">${esc((lm[m.toLoc]||{}).name||'—')}</span></td>
+        <td class="mono" style="font-size:11px">${esc(m.sku)}</td>
+        <td style="font-size:11px">${esc(p.name||'—')}</td>
+        <td class="r b">${m.cases||0}</td>
+        <td class="r">${m.pcs||0}</td>
+        <td class="r b" style="color:#7c3aed">${tot}</td>
+        <td style="font-size:11px">${esc(m.batch||'—')}</td>
+        <td style="font-size:11px" class="${expClass(d)}">${m.expiry?fD(m.expiry):'—'}</td>
+        <td style="font-size:11px;color:var(--g);font-weight:600">${esc(m.createdBy||'—')}</td>
+      </tr>`;}).join('')}
+    </tbody></table></div>`:`<div class="cb" style="text-align:center;padding:40px;color:var(--muted)">No transfers in this period</div>`}
+  </div>`;
+}
+function exportTfCSV(){
+  const lm=locMap(),pm=prodMap();const from=window.__tfrFrom||'',to=window.__tfrTo||'';
+  const inR=d=>(!from||d>=from)&&(!to||d<=to);
+  const tfs=movements.filter(m=>m.type==='TF'&&inR(m.date)).sort((a,b)=>new Date(b.date)-new Date(a.date));
+  const header=['Date','From','To','SKU','Product','Cases','Pcs','Total Pcs','Batch','Expiry','By'];const rows=[];
+  tfs.forEach(m=>{const p=pm[m.sku]||{};const ppc=getPPC(m.sku);const tot=(m.cases*ppc)+(+m.pcs||0);rows.push([m.date,(lm[m.fromLoc]||{}).name||'',(lm[m.toLoc]||{}).name||'',m.sku,p.name||'',m.cases||0,m.pcs||0,tot,m.batch||'',m.expiry||'',m.createdBy||'']);});
+  dlCSV(header,rows,'stock-transfers-'+(from||'all'));
+}
+
 function renderLog(){
   const sorted=[...movements].sort((a,b)=>new Date(b.date)-new Date(a.date)||b.ts-a.ts);
   const lm=locMap(),pm=prodMap();
@@ -3572,7 +3707,7 @@ function exportInRepCSV(){
 
 // ══ USERS MANAGEMENT (admin only) ══
 let usersList=[];
-const ALL_PAGES=[['dashboard','📊 Dashboard'],['in','📥 Stock In'],['out','📤 Stock Out'],['transfer','🔄 Transfer'],['adjust','⚖ Adjustment'],['log','📜 Movements Log'],['rep-all','📈 Stock Reports'],['outrep','📤 Stock Out Report'],['inrep','📥 Stock In Report'],['expiry','⏰ Expiry Report'],['products','📦 Products'],['opening','🔢 Opening Balances'],['locations','📍 Locations'],['invoices','🧾 Tax Invoices'],['customers','👥 Customers'],['sales','💰 Sales Report'],['returns','↩ Sales Returns'],['delivery','🚚 Delivery Notes'],['payments','💵 Payments'],['statement','📑 Customer Statements'],['cash','💰 Cash Management'],['bank','🏦 Bank Account'],['loans','🏷️ Loans'],['suppliers','🌍 Suppliers / Import'],['expenses','💸 Expenses'],['assets','🏛 Fixed Assets'],['accounting','🧮 Accounting & Tax'],['bookkeeping','📓 Bookkeeping'],['finstate','🏦 Financial Statements'],['einvoice','📋 E-Invoicing']];
+const ALL_PAGES=[['dashboard','📊 Dashboard'],['in','📥 Stock In'],['out','📤 Stock Out'],['transfer','🔄 Transfer'],['adjust','⚖ Adjustment'],['log','📜 Movements Log'],['rep-all','📈 Stock Reports'],['outrep','📤 Stock Out Report'],['inrep','📥 Stock In Report'],['adjreport','⚖ Adjustment Report'],['tfreport','🔄 Transfer Report'],['expiry','⏰ Expiry Report'],['products','📦 Products'],['opening','🔢 Opening Balances'],['locations','📍 Locations'],['invoices','🧾 Tax Invoices'],['customers','👥 Customers'],['sales','💰 Sales Report'],['returns','↩ Sales Returns'],['delivery','🚚 Delivery Notes'],['payments','💵 Payments'],['statement','📑 Customer Statements'],['cash','💰 Cash Management'],['bank','🏦 Bank Account'],['loans','🏷️ Loans'],['suppliers','🌍 Suppliers / Import'],['expenses','💸 Expenses'],['assets','🏛 Fixed Assets'],['accounting','🧮 Accounting & Tax'],['bookkeeping','📓 Bookkeeping'],['finstate','🏦 Financial Statements'],['einvoice','📋 E-Invoicing']];
 async function refreshUsers(){
   if(SB&&!useLocal){
     try{
@@ -3702,7 +3837,7 @@ function renderUsers(){
       ['Stock Operations',[['in','📥 Stock In'],['out','📤 Stock Out'],['transfer','🔄 Transfer'],['adjust','⚖ Adjustment'],['log','📜 Movements Log']]],
       ['Sales',[['invoices','🧾 Tax Invoices'],['customers','👥 Customers'],['sales','💰 Sales Report'],['returns','↩ Sales Returns'],['delivery','🚚 Delivery Notes'],['einvoice','📋 E-Invoicing']]],
       ['Finance & Accounting',[['payments','💵 Payments'],['statement','📑 Customer Statements'],['cash','💰 Cash Management'],['bank','🏦 Bank Account'],['loans','🏷️ Loans'],['suppliers','🌍 Suppliers / Import'],['expenses','💸 Expenses'],['assets','🏛 Fixed Assets'],['finstate','🏦 Financial Statements'],['accounting','🧮 Accounting & Tax'],['bookkeeping','📓 Bookkeeping']]],
-      ['Workflow & Reports',[['approvals','✅ Approvals'],['rep-all','📊 Stock Reports'],['outrep','📤 Stock Out Report'],['inrep','📥 Stock In Report'],['expiry','⏰ Expiry Report']]],
+      ['Workflow & Reports',[['approvals','✅ Approvals'],['rep-all','📊 Stock Reports'],['outrep','📤 Stock Out Report'],['inrep','📥 Stock In Report'],['adjreport','⚖ Adjustment Report'],['tfreport','🔄 Transfer Report'],['expiry','⏰ Expiry Report']]],
       ['Master Data',[['products','🗂 Products'],['opening','🏁 Opening Balances'],['locations','📍 Locations'],['audit','🔒 Audit Log']]],
     ];
     return `<div class="card" style="margin-top:14px"><div class="ch" style="background:#eff6ff;border-bottom-color:#bfdbfe;color:#1e40af">🎛 Role Permissions — customise what each role can see</div><div class="cb">
