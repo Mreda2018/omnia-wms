@@ -158,14 +158,15 @@ input:focus,select:focus,textarea:focus{border-color:var(--g);background:var(--w
 .al-g{background:#f0fdf4;border-left:3px solid var(--g);color:#065f46;}
 .al-b{background:#eff6ff;border-left:3px solid var(--blue);color:#1e40af;}
 /* SUMMARY BAND */
-.sband{display:grid;gap:0;background:var(--dark);}
-.sband.c4{grid-template-columns:repeat(4,1fr);}
-.sband.c5{grid-template-columns:repeat(5,1fr);}
-.sc{padding:12px 14px;text-align:center;border-right:1px solid rgba(255,255,255,.08);}
+.sband{display:grid;gap:12px;background:transparent;}
+.sband.c4{grid-template-columns:repeat(auto-fill,minmax(160px,1fr));}
+.sband.c5{grid-template-columns:repeat(auto-fill,minmax(160px,1fr));}
+.sc{padding:15px 16px;text-align:left;border-right:none;background:var(--w);border-radius:14px;border:1px solid #eef2f6;box-shadow:0 1px 8px rgba(12,26,39,.07);transition:transform .12s,box-shadow .12s;}
+.sc:hover{transform:translateY(-2px);box-shadow:0 4px 16px rgba(12,26,39,.1);}
 .sc:last-child{border-right:none;}
-.sl{font-size:9px;color:#64748b;font-weight:700;letter-spacing:.8px;text-transform:uppercase;margin-bottom:3px;}
-.sv{font-size:15px;font-weight:900;color:#fff;}
-.ss{font-size:10px;color:#64748b;margin-top:1px;}
+.sl{font-size:10px;color:var(--muted);font-weight:600;letter-spacing:.3px;text-transform:uppercase;margin-bottom:4px;}
+.sv{font-size:19px;font-weight:800;color:var(--dark);line-height:1.18;}
+.ss{font-size:10px;color:var(--muted);margin-top:2px;}
 /* MODAL */
 .ov{display:none;position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:200;
   align-items:center;justify-content:center;padding:16px;}
@@ -220,7 +221,7 @@ input:focus,select:focus,textarea:focus{border-color:var(--g);background:var(--w
   .topbar>div:last-child{display:flex;gap:6px;width:100%;}
   .topbar>div:last-child .btn{flex:1;justify-content:center;}
   .sband.c4,.sband.c5{grid-template-columns:1fr 1fr!important;}
-  .sc{border-right:none!important;border-bottom:1px solid rgba(255,255,255,.08);}
+  .sc{border-right:none!important;border:1px solid #e2e8f0!important;}
   .kg{gap:8px;}
   td,th{padding:7px 8px;font-size:11px;}
 }
@@ -2280,13 +2281,13 @@ function renderReport(locId){
     </select>
     ${reportMonth?`<span style="background:#dbeafe;color:#1e40af;font-size:11px;font-weight:700;padding:4px 10px;border-radius:6px">Showing: ${new Date(reportMonth+'-01').toLocaleDateString('en-GB',{month:'long',year:'numeric'})}</span>`:''}
   </div>
-  <div class="sband ${locId?'c5':'c5'}" style="border-radius:12px;overflow:hidden;margin-bottom:14px">
+  <div class="sband ${locId?'c5':'c5'}" style="margin-bottom:14px">
     <div class="sc"><div class="sl">Opening Stock</div><div class="sv">${grandOB.toLocaleString()}</div><div class="ss">pieces</div></div>
-    <div class="sc"><div class="sl">+ Stock In</div><div class="sv" style="color:#93c5fd">+${grandSI.toLocaleString()}</div><div class="ss">pieces</div></div>
-    ${!locId?`<div class="sc"><div class="sl">Transfers</div><div class="sv" style="color:#c4b5fd">${grandTI.toLocaleString()}</div><div class="ss">net transfer in</div></div>`:''}
-    <div class="sc"><div class="sl">- Stock Out</div><div class="sv" style="color:#fca5a5">-${grandSO.toLocaleString()}</div><div class="ss">pieces</div></div>
-    ${grandAdj!==0?`<div class="sc"><div class="sl">Adjustments</div><div class="sv" style="color:#ddd6fe">${grandAdj>=0?'+':''}${grandAdj.toLocaleString()}</div><div class="ss">pieces</div></div>`:''}
-    <div class="sc" style="background:rgba(77,183,140,.1)"><div class="sl">Closing Stock</div><div class="sv" style="color:var(--g);font-size:18px">${grandCL.toLocaleString()}</div><div class="ss">AED ${grandVal.toLocaleString('en-AE',{maximumFractionDigits:0})}</div></div>
+    <div class="sc"><div class="sl">+ Stock In</div><div class="sv" style="color:#1e40af">+${grandSI.toLocaleString()}</div><div class="ss">pieces</div></div>
+    ${!locId?`<div class="sc"><div class="sl">Transfers</div><div class="sv" style="color:#7c3aed">${grandTI.toLocaleString()}</div><div class="ss">net transfer in</div></div>`:''}
+    <div class="sc"><div class="sl">- Stock Out</div><div class="sv" style="color:#dc2626">-${grandSO.toLocaleString()}</div><div class="ss">pieces</div></div>
+    ${grandAdj!==0?`<div class="sc"><div class="sl">Adjustments</div><div class="sv" style="color:#8b5cf6">${grandAdj>=0?'+':''}${grandAdj.toLocaleString()}</div><div class="ss">pieces</div></div>`:''}
+    <div class="sc" style="border-top:3px solid var(--g)"><div class="sl">Closing Stock</div><div class="sv" style="color:var(--g)">${grandCL.toLocaleString()}</div><div class="ss">AED ${grandVal.toLocaleString('en-AE',{maximumFractionDigits:0})}</div></div>
   </div>
   ${(()=>{
     const dbl=products.filter(p=>{let ob=0,si=0;targetLocs.forEach(l=>{ob+=gOB(l.id,p.sku);si+=gIn(l.id,p.sku);});return ob>0&&si>0;});
