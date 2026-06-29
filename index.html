@@ -1867,8 +1867,16 @@ function renderAdjust(){
     <div class="fg"><label>Product / SKU *</label><select id="fa-sku" onchange="onSkuChange('fa')"><option value="">Select...</option>${products.map(p=>`<option value="${p.sku}">${esc(p.sku)} — ${esc(p.name)}</option>`).join('')}</select></div>
     <div id="fa-info" style="display:none;background:#faf5ff;border-radius:8px;padding:8px 12px;margin-bottom:10px;font-size:11px;color:#5b21b6;font-weight:700"></div>
     <div class="fg"><label>Adjustment Quantity (pieces, use − for reduction) *</label>
-      <input type="number" id="fa-qty" placeholder="e.g. +24 or -12"/>
+      <input type="number" id="fa-qty" placeholder="e.g. +24 or -12" oninput="onAdjQtyChange()"/>
       <div class="fnote">+positive = add stock | −negative = reduce stock</div>
+    </div>
+    <div id="fa-expiry-box" style="display:none">
+      <div class="frow f2">
+        <div class="fg"><label>Batch / Lot No. <span style="font-weight:400;text-transform:none;color:var(--muted)">(optional)</span></label><input id="fa-batch" placeholder="e.g. L-2026-08"/></div>
+        <div class="fg"><label>Expiry Date <span style="font-weight:400;text-transform:none;color:var(--muted)">(for added stock)</span></label><input type="date" id="fa-expiry" onchange="checkAdjExpiry(this)"/>
+          <div class="fnote" id="fa-expiry-note">Set the expiry so added stock shows correctly in expiry reports</div>
+        </div>
+      </div>
     </div>
     <div class="fg"><label>Reason *</label>
       <select id="fa-reason">
@@ -1974,12 +1982,30 @@ async function saveAdj(){
   const adjQty=parseInt(document.getElementById('fa-qty').value);
   const reason=document.getElementById('fa-reason').value;
   const notes=document.getElementById('fa-notes').value.trim();
+  const batch=document.getElementById('fa-batch')?.value.trim()||'';
+  const expiry=document.getElementById('fa-expiry')?.value||'';
   if(!date||!locId||!sku){msg('fa-msg','⚠ Fill required fields',false);return;}
   if(isNaN(adjQty)||adjQty===0){msg('fa-msg','⚠ Enter a non-zero quantity',false);return;}
-  await insertMov({id:uid(),date,locId,sku,type:'ADJ',cases:0,pcs:0,adjQty,notes:reason+(notes?' — '+notes:''),ts:Date.now()});
-  logAction('ADJUSTMENT',sku+' '+(adjQty>0?'+':'')+adjQty+' pcs at '+locId+' — '+reason);
+  // expiry/batch only stored for positive adjustments (adding stock)
+  const mov={id:uid(),date,locId,sku,type:'ADJ',cases:0,pcs:0,adjQty,notes:reason+(notes?' — '+notes:''),ts:Date.now()};
+  if(adjQty>0){mov.batch=batch;mov.expiry=expiry;}
+  await insertMov(mov);
+  logAction('ADJUSTMENT',sku+' '+(adjQty>0?'+':'')+adjQty+' pcs at '+locId+' — '+reason+(expiry?' (exp '+expiry+')':''));
   msg('fa-msg','✅ Adjustment saved!',true);
   setTimeout(()=>render(),800);
+}
+function onAdjQtyChange(){
+  const q=parseInt(document.getElementById('fa-qty')?.value);
+  const box=document.getElementById('fa-expiry-box');
+  if(box)box.style.display=(q>0)?'block':'none';
+}
+function checkAdjExpiry(el){
+  if(!el||!el.value)return;
+  const d=daysUntilExpiry(el.value);const note=document.getElementById('fa-expiry-note');if(!note)return;
+  if(d<0)note.innerHTML='<b style="color:var(--red)">⛔ This date is ALREADY EXPIRED</b>';
+  else if(d<=30)note.innerHTML=`<b style="color:var(--red)">⚠ Expiring in ${d} days</b>`;
+  else if(d<=90)note.innerHTML=`<span style="color:#92400e">⏰ Expiring in ${d} days — monitor</span>`;
+  else note.innerHTML=`<span style="color:var(--g)">✅ ${d} days remaining</span>`;
 }
 function delMov(id){if(!confirm('Delete this entry?'))return;dbDelMov(id).then(()=>render());}
 
@@ -2044,14 +2070,16 @@ function renderAdjReport(){
     <div class="dkpi"><div class="dkpi-ic" style="background:${valImpact>=0?'#16a34a':'#dc2626'}22;color:${valImpact>=0?'#16a34a':'#dc2626'}">💰</div><div style="flex:1"><div class="dkpi-l">Value Impact</div><div class="dkpi-v" style="color:${valImpact>=0?'#16a34a':'#dc2626'}">${valImpact>=0?'+':'−'}AED ${Math.abs(valImpact).toLocaleString('en-AE',{maximumFractionDigits:0})}</div><div class="dkpi-s">at cost price</div></div></div>
   </div>
   <div class="card"><div class="ch">⚖ Stock Adjustment Report ${from||to?`<span style="font-size:11px;font-weight:400;color:var(--muted)">— ${from?fD(from):'start'} to ${to?fD(to):'now'}</span>`:''}</div>
-    ${adjs.length?`<div class="tw"><table><thead><tr><th>Date</th><th>Location</th><th>SKU</th><th>Product</th><th class="r">Adjustment</th><th class="r">Value</th><th>Reason / Ref</th><th>By</th></tr></thead><tbody>
-      ${adjs.map(m=>{const p=pm[m.sku]||{};const v=m.adjQty*(p.cost||0);return`<tr>
+    ${adjs.length?`<div class="tw"><table><thead><tr><th>Date</th><th>Location</th><th>SKU</th><th>Product</th><th class="r">Adjustment</th><th class="r">Value</th><th>Batch</th><th>Expiry</th><th>Reason / Ref</th><th>By</th></tr></thead><tbody>
+      ${adjs.map(m=>{const p=pm[m.sku]||{};const v=m.adjQty*(p.cost||0);const d=m.expiry?daysUntilExpiry(m.expiry):null;return`<tr>
         <td style="font-size:11px">${fD(m.date)}</td>
         <td style="font-size:11px">${esc((lm[m.locId]||{}).name||'—')}</td>
         <td class="mono" style="font-size:11px">${esc(m.sku)}</td>
         <td style="font-size:11px">${esc(p.name||'—')}</td>
         <td class="r b" style="color:${m.adjQty>=0?'#16a34a':'#dc2626'}">${m.adjQty>=0?'⊕ +':'⊖ −'}${Math.abs(m.adjQty)}</td>
         <td class="r" style="color:${v>=0?'#16a34a':'#dc2626'};font-size:11px">${v>=0?'+':'−'}${Math.abs(v).toLocaleString('en-AE',{maximumFractionDigits:0})}</td>
+        <td style="font-size:11px">${esc(m.batch||'—')}</td>
+        <td style="font-size:11px" class="${m.expiry?expClass(d):''}">${m.expiry?fD(m.expiry):'—'}</td>
         <td style="font-size:11px;color:var(--muted)">${esc(m.ref||m.notes||'—')}</td>
         <td style="font-size:11px;color:var(--g);font-weight:600">${esc(m.createdBy||'—')}</td>
       </tr>`;}).join('')}
@@ -2062,8 +2090,8 @@ function exportAdjCSV(){
   const lm=locMap(),pm=prodMap();const from=window.__adjrFrom||'',to=window.__adjrTo||'';
   const inR=d=>(!from||d>=from)&&(!to||d<=to);
   const adjs=movements.filter(m=>m.type==='ADJ'&&inR(m.date)).sort((a,b)=>new Date(b.date)-new Date(a.date));
-  const header=['Date','Location','SKU','Product','Adjustment (pcs)','Value (AED)','Reason/Ref','By'];const rows=[];
-  adjs.forEach(m=>{const p=pm[m.sku]||{};rows.push([m.date,(lm[m.locId]||{}).name||'',m.sku,p.name||'',m.adjQty,(m.adjQty*(p.cost||0)).toFixed(2),m.ref||m.notes||'',m.createdBy||'']);});
+  const header=['Date','Location','SKU','Product','Adjustment (pcs)','Value (AED)','Batch','Expiry','Reason/Ref','By'];const rows=[];
+  adjs.forEach(m=>{const p=pm[m.sku]||{};rows.push([m.date,(lm[m.locId]||{}).name||'',m.sku,p.name||'',m.adjQty,(m.adjQty*(p.cost||0)).toFixed(2),m.batch||'',m.expiry||'',m.ref||m.notes||'',m.createdBy||'']);});
   dlCSV(header,rows,'stock-adjustments-'+(from||'all'));
 }
 
