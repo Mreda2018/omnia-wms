@@ -1862,22 +1862,41 @@ function renderAdjust(){
     <div class="al al-b" style="margin-bottom:12px">ℹ️ Use for physical count variances, write-offs, or corrections. Enter positive or negative quantity.</div>
     <div class="frow f2">
       <div class="fg"><label>Date *</label><input type="date" id="fa-date" value="${TODAY}"/></div>
-      <div class="fg"><label>Location *</label><select id="fa-loc"><option value="">Select...</option>${locs.map(l=>`<option value="${l.id}">${l.icon} ${esc(l.name)}</option>`).join('')}</select></div>
+      <div class="fg"><label>Location *</label><select id="fa-loc" onchange="refreshAdjBatchPick();fillAdjExpiryOptions()"><option value="">Select...</option>${locs.map(l=>`<option value="${l.id}">${l.icon} ${esc(l.name)}</option>`).join('')}</select></div>
     </div>
-    <div class="fg"><label>Product / SKU *</label><select id="fa-sku" onchange="onSkuChange('fa')"><option value="">Select...</option>${products.map(p=>`<option value="${p.sku}">${esc(p.sku)} — ${esc(p.name)}</option>`).join('')}</select></div>
+    <div class="fg"><label>Product / SKU *</label><select id="fa-sku" onchange="onAdjSkuChange()"><option value="">Select...</option>${products.map(p=>`<option value="${p.sku}">${esc(p.sku)} — ${esc(p.name)}</option>`).join('')}</select></div>
     <div id="fa-info" style="display:none;background:#faf5ff;border-radius:8px;padding:8px 12px;margin-bottom:10px;font-size:11px;color:#5b21b6;font-weight:700"></div>
-    <div class="fg"><label>Adjustment Quantity (pieces, use − for reduction) *</label>
-      <input type="number" id="fa-qty" placeholder="e.g. +24 or -12" oninput="onAdjQtyChange()"/>
-      <div class="fnote">+positive = add stock | −negative = reduce stock</div>
-    </div>
-    <div id="fa-expiry-box" style="display:none">
-      <div class="frow f2">
-        <div class="fg"><label>Batch / Lot No. <span style="font-weight:400;text-transform:none;color:var(--muted)">(optional)</span></label><input id="fa-batch" placeholder="e.g. L-2026-08"/></div>
-        <div class="fg"><label>Expiry Date <span style="font-weight:400;text-transform:none;color:var(--muted)">(for added stock)</span></label><input type="date" id="fa-expiry" onchange="checkAdjExpiry(this)"/>
-          <div class="fnote" id="fa-expiry-note">Set the expiry so added stock shows correctly in expiry reports</div>
-        </div>
+
+    <div class="fg"><label>Adjustment Type *</label>
+      <div style="display:flex;gap:8px">
+        <button type="button" id="fa-dir-add" onclick="setAdjDir('add')" style="flex:1;padding:11px;border-radius:10px;border:2px solid #16a34a;background:#16a34a;color:#fff;font-weight:800;cursor:pointer;font-size:13px">➕ Add Stock</button>
+        <button type="button" id="fa-dir-reduce" onclick="setAdjDir('reduce')" style="flex:1;padding:11px;border-radius:10px;border:2px solid #e2e8f0;background:#fff;color:#64748b;font-weight:800;cursor:pointer;font-size:13px">➖ Reduce Stock</button>
       </div>
     </div>
+
+    <div class="fg"><label>Quantity (pieces) *</label>
+      <input type="number" id="fa-qty" min="1" placeholder="e.g. 24" oninput="onAdjQtyChange()"/>
+      <div class="fnote" id="fa-qty-note" style="color:#16a34a;font-weight:700">Will ADD this quantity to stock</div>
+    </div>
+
+    <div id="fa-batch-pick-box" style="display:none">
+      <div class="fg"><label>Which batch to reduce? <span style="font-weight:400;text-transform:none;color:var(--muted)">(by expiry)</span></label>
+        <select id="fa-batch-pick"></select>
+        <div class="fnote">Pick the batch you're removing stock from</div>
+      </div>
+    </div>
+
+    <div id="fa-expiry-box" style="display:none">
+      <div class="frow f2">
+        <div class="fg"><label>Expiry Date <span style="font-weight:400;text-transform:none;color:var(--muted)">(for added stock)</span></label>
+          <select id="fa-expiry-pick" onchange="onAdjExpiryPick()" style="margin-bottom:6px"></select>
+          <input type="date" id="fa-expiry" onchange="checkAdjExpiry(this)" style="display:none"/>
+          <div class="fnote" id="fa-expiry-note">Choose an existing batch date or add a new one</div>
+        </div>
+        <div class="fg"><label>Batch / Lot No. <span style="font-weight:400;text-transform:none;color:var(--muted)">(optional)</span></label><input id="fa-batch" placeholder="e.g. L-2026-08"/></div>
+      </div>
+    </div>
+
     <div class="fg"><label>Reason *</label>
       <select id="fa-reason">
         <option value="Physical Count Variance">Physical Count Variance</option>
@@ -1979,25 +1998,85 @@ async function saveAdj(){
   const date=document.getElementById('fa-date').value;
   const locId=document.getElementById('fa-loc').value;
   const sku=document.getElementById('fa-sku').value;
-  const adjQty=parseInt(document.getElementById('fa-qty').value);
+  let qty=parseInt(document.getElementById('fa-qty').value);
   const reason=document.getElementById('fa-reason').value;
   const notes=document.getElementById('fa-notes').value.trim();
-  const batch=document.getElementById('fa-batch')?.value.trim()||'';
-  const expiry=document.getElementById('fa-expiry')?.value||'';
   if(!date||!locId||!sku){msg('fa-msg','⚠ Fill required fields',false);return;}
-  if(isNaN(adjQty)||adjQty===0){msg('fa-msg','⚠ Enter a non-zero quantity',false);return;}
-  // expiry/batch only stored for positive adjustments (adding stock)
+  if(isNaN(qty)||qty<=0){msg('fa-msg','⚠ Enter a quantity greater than zero',false);return;}
+  const adjQty=(__adjDir==='reduce')?-Math.abs(qty):Math.abs(qty);
   const mov={id:uid(),date,locId,sku,type:'ADJ',cases:0,pcs:0,adjQty,notes:reason+(notes?' — '+notes:''),ts:Date.now()};
-  if(adjQty>0){mov.batch=batch;mov.expiry=expiry;}
+  if(__adjDir==='add'){
+    mov.expiry=document.getElementById('fa-expiry')?.value||'';
+    mov.batch=document.getElementById('fa-batch')?.value.trim()||'';
+  }else{
+    // reduce: pull expiry/batch from the chosen batch so the right lot is consumed
+    const pickVal=document.getElementById('fa-batch-pick')?.value||'';
+    if(pickVal){const [exp,bt]=pickVal.split('|');mov.expiry=exp||'';mov.batch=bt||'';}
+  }
   await insertMov(mov);
-  logAction('ADJUSTMENT',sku+' '+(adjQty>0?'+':'')+adjQty+' pcs at '+locId+' — '+reason+(expiry?' (exp '+expiry+')':''));
+  logAction('ADJUSTMENT',sku+' '+(adjQty>0?'+':'')+adjQty+' pcs at '+locId+' — '+reason+(mov.expiry?' (exp '+mov.expiry+')':''));
   msg('fa-msg','✅ Adjustment saved!',true);
   setTimeout(()=>render(),800);
 }
+let __adjDir='add';
+function setAdjDir(dir){
+  __adjDir=dir;
+  const addBtn=document.getElementById('fa-dir-add'),redBtn=document.getElementById('fa-dir-reduce');
+  if(addBtn&&redBtn){
+    if(dir==='add'){
+      addBtn.style.cssText='flex:1;padding:11px;border-radius:10px;border:2px solid #16a34a;background:#16a34a;color:#fff;font-weight:800;cursor:pointer;font-size:13px';
+      redBtn.style.cssText='flex:1;padding:11px;border-radius:10px;border:2px solid #e2e8f0;background:#fff;color:#64748b;font-weight:800;cursor:pointer;font-size:13px';
+    }else{
+      redBtn.style.cssText='flex:1;padding:11px;border-radius:10px;border:2px solid #dc2626;background:#dc2626;color:#fff;font-weight:800;cursor:pointer;font-size:13px';
+      addBtn.style.cssText='flex:1;padding:11px;border-radius:10px;border:2px solid #e2e8f0;background:#fff;color:#64748b;font-weight:800;cursor:pointer;font-size:13px';
+    }
+  }
+  const note=document.getElementById('fa-qty-note');
+  if(note){note.textContent=dir==='add'?'Will ADD this quantity to stock':'Will REDUCE this quantity from stock';note.style.color=dir==='add'?'#16a34a':'#dc2626';}
+  // toggle expiry (add) vs batch-pick (reduce)
+  document.getElementById('fa-expiry-box').style.display=(dir==='add')?'block':'none';
+  refreshAdjBatchPick();
+}
+function onAdjSkuChange(){
+  onSkuChange('fa');
+  refreshAdjBatchPick();
+  // populate expiry dropdown with existing batches for this product (across the chosen location)
+  fillAdjExpiryOptions();
+}
+function adjBatches(){
+  const sku=document.getElementById('fa-sku')?.value;
+  const locId=document.getElementById('fa-loc')?.value;
+  if(!sku||!locId)return [];
+  return getBatchStock(locId,sku);
+}
+function refreshAdjBatchPick(){
+  const box=document.getElementById('fa-batch-pick-box');const sel=document.getElementById('fa-batch-pick');
+  if(!box||!sel)return;
+  if(__adjDir!=='reduce'){box.style.display='none';return;}
+  const bs=adjBatches();
+  if(!bs.length){box.style.display='none';return;}
+  box.style.display='block';
+  sel.innerHTML=bs.map(b=>{const d=b.expiry?daysUntilExpiry(b.expiry):null;const lbl=(b.expiry?('Exp '+fD(b.expiry)+(d!==null?' ('+d+'d)':'')):'No expiry')+(b.batch?' · '+b.batch:'')+' — '+b.qty+' pcs';return`<option value="${b.expiry||''}|${esc(b.batch||'')}">${lbl}</option>`;}).join('');
+}
+function fillAdjExpiryOptions(){
+  const sel=document.getElementById('fa-expiry-pick');if(!sel)return;
+  const bs=adjBatches();
+  let opts='<option value="__new__">➕ New expiry date…</option>';
+  bs.forEach(b=>{if(b.expiry){const d=daysUntilExpiry(b.expiry);opts+=`<option value="${b.expiry}|${esc(b.batch||'')}">Exp ${fD(b.expiry)} (${d}d)${b.batch?' · '+b.batch:''}</option>`;}});
+  sel.innerHTML=opts;
+  // default to new
+  document.getElementById('fa-expiry').style.display='block';
+}
+function onAdjExpiryPick(){
+  const v=document.getElementById('fa-expiry-pick').value;
+  const dateInput=document.getElementById('fa-expiry'),batchInput=document.getElementById('fa-batch');
+  if(v==='__new__'){dateInput.style.display='block';dateInput.value='';if(batchInput)batchInput.value='';document.getElementById('fa-expiry-note').textContent='Enter the new batch expiry date';}
+  else{const [exp,bt]=v.split('|');dateInput.style.display='none';dateInput.value=exp;if(batchInput)batchInput.value=bt||'';checkAdjExpiry(dateInput);}
+}
 function onAdjQtyChange(){
-  const q=parseInt(document.getElementById('fa-qty')?.value);
-  const box=document.getElementById('fa-expiry-box');
-  if(box)box.style.display=(q>0)?'block':'none';
+  // quantity is always positive now; direction handled by buttons
+  const note=document.getElementById('fa-qty-note');
+  if(note){note.textContent=__adjDir==='add'?'Will ADD this quantity to stock':'Will REDUCE this quantity from stock';}
 }
 function checkAdjExpiry(el){
   if(!el||!el.value)return;
