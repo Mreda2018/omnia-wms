@@ -1321,7 +1321,14 @@ function renderDashboard(){
   locs.forEach(l=>{products.forEach(p=>{const cl=Math.max(0,getClose(l.id,p.sku));totalPcs+=cl;if(cl>0)totalSkus++;totalVal+=cl*(p.cost||0);});});
   const lowItems=[],negItems=[],expItems=[];
   locs.forEach(l=>{products.forEach(p=>{const cl=getClose(l.id,p.sku);if(cl<0)negItems.push({l,p,cl});else if(cl>0&&cl<(p.reorder||p.ppc))lowItems.push({l,p,cl});});});
-  movements.filter(m=>m.type==='IN'&&m.expiry).forEach(m=>{const d=daysUntilExpiry(m.expiry);if(d!==null&&d<=90){const p=pm[m.sku]||{};expItems.push({m,p,d,loc:lm[m.locId]||{}});}});
+  // Expiry alerts based on ACTUAL remaining batch stock (nets out stock-out & reductions), not raw stock-in
+  products.forEach(p=>locs.forEach(l=>{
+    getBatchStock(l.id,p.sku).forEach(b=>{
+      if(!b.expiry)return;
+      const d=daysUntilExpiry(b.expiry);
+      if(d!==null&&d<=90)expItems.push({m:{sku:p.sku,expiry:b.expiry,batch:b.batch},p,d,loc:l,qty:b.qty});
+    });
+  }));
   const recent=movements.slice(-6).reverse();
   const fin=canAccess('invoices')||canAccess('payments')||canAccess('expenses')||canAccess('cash');
   const expired=expItems.filter(e=>e.d<0).length, exp30=expItems.filter(e=>e.d>=0&&e.d<=30).length;
@@ -1402,8 +1409,8 @@ function renderDashboard(){
   <div class="dash-hero">${heroCards}</div>
 
   ${negItems.length?`<div class="al al-r" style="margin-top:14px">🔴 <div><b>Negative Stock:</b> ${negItems.map(i=>`${i.l.name} · ${i.p.sku} (${i.cl})`).join(' | ')}</div></div>`:''}
-  ${expired?`<div class="al al-r" style="margin-top:${negItems.length?'8':'14'}px">☠️ <div><b>EXPIRED:</b> ${expItems.filter(e=>e.d<0).map(i=>`${i.m.sku} @ ${i.loc.name} (${fD(i.m.expiry)})`).join(' | ')}</div></div>`:''}
-  ${exp30?`<div class="al al-a" style="margin-top:8px">⏰ <div><b>Expiring within 30 days:</b> ${expItems.filter(e=>e.d>=0&&e.d<=30).map(i=>`${i.m.sku} @ ${i.loc.name} (${i.d}d)`).join(' | ')}</div></div>`:''}
+  ${expired?`<div class="al al-r" style="margin-top:${negItems.length?'8':'14'}px">☠️ <div><b>EXPIRED:</b> ${expItems.filter(e=>e.d<0).map(i=>`${i.m.sku} @ ${i.loc.name} (${i.qty} pcs · ${fD(i.m.expiry)})`).join(' | ')}</div></div>`:''}
+  ${exp30?`<div class="al al-a" style="margin-top:8px">⏰ <div><b>Expiring within 30 days:</b> ${expItems.filter(e=>e.d>=0&&e.d<=30).map(i=>`${i.m.sku} @ ${i.loc.name} (${i.qty} pcs · ${i.d}d)`).join(' | ')}</div></div>`:''}
 
   <div class="dash-grid" style="margin-top:14px">
     ${fin?`<div class="card dash-wide"><div class="ch">📈 Sales, Collections & Expenses <span style="font-size:11px;font-weight:400;color:var(--muted)">— last 6 months</span></div>
@@ -2149,8 +2156,8 @@ function renderAdjReport(){
     <div class="dkpi"><div class="dkpi-ic" style="background:${valImpact>=0?'#16a34a':'#dc2626'}22;color:${valImpact>=0?'#16a34a':'#dc2626'}">💰</div><div style="flex:1"><div class="dkpi-l">Value Impact</div><div class="dkpi-v" style="color:${valImpact>=0?'#16a34a':'#dc2626'}">${valImpact>=0?'+':'−'}AED ${Math.abs(valImpact).toLocaleString('en-AE',{maximumFractionDigits:0})}</div><div class="dkpi-s">at cost price</div></div></div>
   </div>
   <div class="card"><div class="ch">⚖ Stock Adjustment Report ${from||to?`<span style="font-size:11px;font-weight:400;color:var(--muted)">— ${from?fD(from):'start'} to ${to?fD(to):'now'}</span>`:''}</div>
-    ${adjs.length?`<div class="tw"><table><thead><tr><th>Date</th><th>Location</th><th>SKU</th><th>Product</th><th class="r">Adjustment</th><th class="r">Value</th><th>Batch</th><th>Expiry</th><th>Reason / Ref</th><th>By</th></tr></thead><tbody>
-      ${adjs.map(m=>{const p=pm[m.sku]||{};const v=m.adjQty*(p.cost||0);const d=m.expiry?daysUntilExpiry(m.expiry):null;return`<tr>
+    ${adjs.length?`<div class="tw"><table><thead><tr><th>Date</th><th>Location</th><th>SKU</th><th>Product</th><th class="r">Adjustment</th><th class="r">Value</th><th>Batch</th><th>Expiry</th><th>Reason</th><th>Notes</th><th>By</th></tr></thead><tbody>
+      ${adjs.map(m=>{const p=pm[m.sku]||{};const v=m.adjQty*(p.cost||0);const d=m.expiry?daysUntilExpiry(m.expiry):null;const full=m.notes||'';const parts=full.split(' — ');const reason=parts[0]||'—';const note=parts.slice(1).join(' — ')||'';return`<tr>
         <td style="font-size:11px">${fD(m.date)}</td>
         <td style="font-size:11px">${esc((lm[m.locId]||{}).name||'—')}</td>
         <td class="mono" style="font-size:11px">${esc(m.sku)}</td>
@@ -2159,7 +2166,8 @@ function renderAdjReport(){
         <td class="r" style="color:${v>=0?'#16a34a':'#dc2626'};font-size:11px">${v>=0?'+':'−'}${Math.abs(v).toLocaleString('en-AE',{maximumFractionDigits:0})}</td>
         <td style="font-size:11px">${esc(m.batch||'—')}</td>
         <td style="font-size:11px" class="${m.expiry?expClass(d):''}">${m.expiry?fD(m.expiry):'—'}</td>
-        <td style="font-size:11px;color:var(--muted)">${esc(m.ref||m.notes||'—')}</td>
+        <td style="font-size:11px;color:#5b21b6;font-weight:600">${esc(reason)}</td>
+        <td style="font-size:11px;color:var(--muted)">${esc(note||'—')}</td>
         <td style="font-size:11px;color:var(--g);font-weight:600">${esc(m.createdBy||'—')}</td>
       </tr>`;}).join('')}
     </tbody></table></div>`:`<div class="cb" style="text-align:center;padding:40px;color:var(--muted)">No stock adjustments in this period</div>`}
@@ -2169,8 +2177,8 @@ function exportAdjCSV(){
   const lm=locMap(),pm=prodMap();const from=window.__adjrFrom||'',to=window.__adjrTo||'';
   const inR=d=>(!from||d>=from)&&(!to||d<=to);
   const adjs=movements.filter(m=>m.type==='ADJ'&&inR(m.date)).sort((a,b)=>new Date(b.date)-new Date(a.date));
-  const header=['Date','Location','SKU','Product','Adjustment (pcs)','Value (AED)','Batch','Expiry','Reason/Ref','By'];const rows=[];
-  adjs.forEach(m=>{const p=pm[m.sku]||{};rows.push([m.date,(lm[m.locId]||{}).name||'',m.sku,p.name||'',m.adjQty,(m.adjQty*(p.cost||0)).toFixed(2),m.batch||'',m.expiry||'',m.ref||m.notes||'',m.createdBy||'']);});
+  const header=['Date','Location','SKU','Product','Adjustment (pcs)','Value (AED)','Batch','Expiry','Reason','Notes','By'];const rows=[];
+  adjs.forEach(m=>{const p=pm[m.sku]||{};const full=m.notes||'';const parts=full.split(' — ');const reason=parts[0]||'';const note=parts.slice(1).join(' — ')||'';rows.push([m.date,(lm[m.locId]||{}).name||'',m.sku,p.name||'',m.adjQty,(m.adjQty*(p.cost||0)).toFixed(2),m.batch||'',m.expiry||'',reason,note,m.createdBy||'']);});
   dlCSV(header,rows,'stock-adjustments-'+(from||'all'));
 }
 
