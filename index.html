@@ -1405,6 +1405,30 @@ function renderDashboard(){
 
   const maxFin=Math.max(1,...salesByM,...recvByM,...expByM);
 
+  // ══ NEW INVENTORY CHARTS DATA ══
+  // 1) Stock movement In vs Out (last 6 months, in pieces)
+  const stockInByM=months.map(mo=>movements.filter(m=>m.type==='IN'&&inMonth(m.date,mo)).reduce((a,m)=>a+((m.cases*getPPC(m.sku))+(+m.pcs||0)),0));
+  const stockOutByM=months.map(mo=>movements.filter(m=>m.type==='OUT'&&inMonth(m.date,mo)).reduce((a,m)=>a+((m.cases*getPPC(m.sku))+(+m.pcs||0)),0));
+  const hasStockFlow=stockInByM.some(v=>v>0)||stockOutByM.some(v=>v>0);
+
+  // 2) Stock distribution by category (pieces)
+  const catAgg={};
+  products.forEach(p=>{let pcs=0;locs.forEach(l=>{pcs+=Math.max(0,getClose(l.id,p.sku));});if(pcs>0){const c=p.cat||'Other';catAgg[c]=(catAgg[c]||0)+pcs;}});
+  const catColors=['#4DB78C','#3b82f6','#f59e0b','#8b5cf6','#ec4899','#14b8a6','#f97316','#64748b'];
+  const catSeg=Object.entries(catAgg).map(([k,v],i)=>({label:k,value:v,color:catColors[i%catColors.length]})).sort((a,b)=>b.value-a.value);
+
+  // 3) Expiry summary (batch-accurate): expired / ≤30d / ≤90d — count of batches + pieces
+  let exExpired=0,exSoon30=0,exSoon90=0,pcExpired=0,pcSoon30=0,pcSoon90=0;
+  products.forEach(p=>locs.forEach(l=>{getBatchStock(l.id,p.sku).forEach(b=>{if(!b.expiry)return;const dd=daysUntilExpiry(b.expiry);if(dd<0){exExpired++;pcExpired+=b.qty;}else if(dd<=30){exSoon30++;pcSoon30+=b.qty;}else if(dd<=90){exSoon90++;pcSoon90+=b.qty;}});}));
+  const expBars=[{label:'⛔ Expired',value:pcExpired,color:'#dc2626'},{label:'⚠ Within 30 days',value:pcSoon30,color:'#f59e0b'},{label:'⏰ Within 90 days',value:pcSoon90,color:'#eab308'}].filter(x=>x.value>0);
+
+  // 4) Dead / slow-moving stock — no OUT movement in last 60 days but still holds stock
+  const cutoff=new Date(now.getFullYear(),now.getMonth(),now.getDate()-60).toISOString().split('T')[0];
+  const lastOut={};
+  movements.filter(m=>m.type==='OUT').forEach(m=>{if(!lastOut[m.sku]||m.date>lastOut[m.sku])lastOut[m.sku]=m.date;});
+  const deadStock=products.map(p=>{let pcs=0;locs.forEach(l=>{pcs+=Math.max(0,getClose(l.id,p.sku));});const lo=lastOut[p.sku]||null;const stale=(!lo||lo<cutoff);return{p,pcs,lastOut:lo,stale,value:Math.round(pcs*(p.cost||0))};}).filter(x=>x.pcs>0&&x.stale).sort((a,b)=>b.value-a.value);
+  const deadVal=deadStock.reduce((a,x)=>a+x.value,0);
+
   document.getElementById('content').innerHTML=`
   <div class="dash-hero">${heroCards}</div>
 
@@ -1460,6 +1484,56 @@ function renderDashboard(){
       </tr>`).join('')}
       </tbody></table></div></div>`;
   })()}
+
+  <!-- ══ INVENTORY INSIGHTS (Naif + Management) ══ -->
+  <div class="dash-grid" style="margin-top:14px">
+    ${hasStockFlow?`<div class="card dash-wide"><div class="ch">📊 Stock Movement <span style="font-size:11px;font-weight:400;color:var(--muted)">— pieces In vs Out, last 6 months</span></div>
+      <div class="cb" style="padding:16px 14px 6px">
+        ${svgLineChart([{name:'Stock In',color:'#16a34a',data:stockInByM},{name:'Stock Out',color:'#dc2626',data:stockOutByM}],{labels:months.map(m=>m.label),h:190})}
+        <div style="display:flex;gap:18px;justify-content:center;margin-top:6px">
+          <span style="font-size:10px;color:#475569"><span style="display:inline-block;width:10px;height:10px;background:#16a34a;border-radius:3px;vertical-align:middle"></span> Stock In (received)</span>
+          <span style="font-size:10px;color:#475569"><span style="display:inline-block;width:10px;height:10px;background:#dc2626;border-radius:3px;vertical-align:middle"></span> Stock Out (sold/dispatched)</span>
+        </div>
+      </div></div>`:''}
+  </div>
+
+  <div class="dash-grid" style="margin-top:14px">
+    ${catSeg.length?`<div class="card"><div class="ch">🥧 Stock by Category <span style="font-size:11px;font-weight:400;color:var(--muted)">— pieces</span></div>
+      <div class="cb" style="display:flex;align-items:center;gap:14px;flex-wrap:wrap;justify-content:center">
+        ${svgDonut(catSeg,{size:150})}
+        <div style="flex:1;min-width:140px">
+          ${catSeg.map(s=>`<div style="display:flex;align-items:center;gap:7px;margin-bottom:6px;font-size:11px">
+            <span style="width:11px;height:11px;border-radius:3px;background:${s.color};flex-shrink:0"></span>
+            <span style="flex:1;color:#334155">${esc(s.label)}</span>
+            <b style="color:#0c1a27">${s.value.toLocaleString()} pcs</b></div>`).join('')}
+        </div>
+      </div></div>`:''}
+
+    ${expBars.length?`<div class="card"><div class="ch">⏰ Expiry Overview <span style="font-size:11px;font-weight:400;color:var(--muted)">— pieces at risk</span></div>
+      <div class="cb">${svgBars(expBars,{fmt:v=>v.toLocaleString()+' pcs'})}
+        <div style="display:flex;gap:10px;margin-top:10px;font-size:10px;color:var(--muted);border-top:1px solid #eef2f6;padding-top:8px">
+          <span>⛔ ${exExpired} batch${exExpired!==1?'es':''} expired</span>·
+          <span>⚠ ${exSoon30} within 30d</span>·
+          <span>⏰ ${exSoon90} within 90d</span>
+        </div>
+      </div></div>`:`<div class="card"><div class="ch">⏰ Expiry Overview</div><div class="cb" style="text-align:center;padding:30px;color:var(--g)"><div style="font-size:32px;margin-bottom:6px">✅</div>No stock expiring within 90 days</div></div>`}
+  </div>
+
+  ${deadStock.length?`<div class="card" style="margin-top:14px"><div class="ch" style="background:#fef2f2;border-bottom-color:#fca5a5;color:#991b1b;display:flex;justify-content:space-between">
+    <span>😴 Dead / Slow-Moving Stock <span style="font-size:11px;font-weight:400">— no sales in 60+ days · ${deadStock.length} items · ${aed(deadVal)} tied up</span></span>
+    <button class="btn bd bsm no-print" onclick="window.print()">🖨 Print</button></div>
+    <div class="tw"><table><thead><tr><th>SKU</th><th>Product</th><th class="r">Stock (pcs)</th><th class="r">Value</th><th>Last Sold</th><th class="r">Days Idle</th></tr></thead><tbody>
+    ${deadStock.slice(0,10).map(x=>{const idle=x.lastOut?Math.floor((now-new Date(x.lastOut))/86400000):null;return`<tr>
+      <td class="mono" style="font-size:11px">${esc(x.p.sku)}</td>
+      <td style="font-weight:600">${esc(x.p.name)}</td>
+      <td class="r b">${x.pcs.toLocaleString()}</td>
+      <td class="r b" style="color:#b45309">${aed(x.value)}</td>
+      <td style="font-size:11px;color:var(--muted)">${x.lastOut?fD(x.lastOut):'never sold'}</td>
+      <td class="r" style="color:#dc2626;font-weight:700">${idle!==null?idle+'d':'—'}</td>
+    </tr>`;}).join('')}
+    </tbody></table></div>
+    ${deadStock.length>10?`<div style="text-align:center;padding:8px;font-size:11px;color:var(--muted)">+ ${deadStock.length-10} more items</div>`:''}
+  </div>`:''}
 
   ${recent.length?`<div class="card" style="margin-top:14px"><div class="ch">🕒 Recent Movements <span style="font-size:11px;font-weight:400;color:var(--muted)">(last 6)</span></div>
   <div class="tw"><table><thead><tr><th>Date</th><th>Type</th><th>Location</th><th>SKU</th><th class="r">Qty</th><th>Ref</th></tr></thead><tbody>
