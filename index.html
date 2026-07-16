@@ -423,15 +423,31 @@ function setConn(cls,txt){
   t.textContent=txt;
 }
 
+// ── FETCH ALL ROWS (Supabase caps selects at 1000 rows — page through everything) ──
+async function fetchAll(table,orderCol,asc){
+  const all=[];const CHUNK=1000;let from=0;
+  while(true){
+    let q=SB.from(table).select('*');
+    if(orderCol)q=q.order(orderCol,{ascending:asc!==false});
+    const{data,error}=await q.range(from,from+CHUNK-1);
+    if(error){console.error(table+' load:',error.message);break;}
+    if(data&&data.length)all.push(...data);
+    if(!data||data.length<CHUNK)break;
+    from+=CHUNK;
+  }
+  return all;
+}
+
 async function loadFromDB(){
   if(!SB){load();return;}
   try{
-    const[lR,pR,mR,oR]=await Promise.all([
+    const[lR,pR,mAll,oR]=await Promise.all([
       SB.from('locations').select('*').order('id'),
       SB.from('products').select('*').order('sku'),
-      SB.from('movements').select('*').order('date',{ascending:false}),
+      fetchAll('movements','date',false),
       SB.from('opening_balances').select('*'),
     ]);
+    const mR={data:mAll};
     if(lR.data?.length) locs=lR.data.map(r=>({id:r.id,name:r.name,icon:r.icon||'📦',active:r.active!==false}));
     else locs=[...LOCS_DEF];
     if(pR.data?.length) products=pR.data.map(r=>({id:r.id,sku:r.sku,name:r.name,cat:r.cat||'Other',brand:r.brand||'',ppc:r.ppc||1,reorder:r.reorder||0,cost:+r.cost||0,sell:+r.sell||0,sellPc:+r.sell_pc||0,expiry:r.expiry||'',shelfLife:r.shelf_life||0,hsCode:r.hs_code||''}));
@@ -446,7 +462,7 @@ function subscribeRealtime(){
   if(!SB)return;
   SB.channel('wms-realtime')
     .on('postgres_changes',{event:'*',schema:'public',table:'movements'},async()=>{
-      const{data}=await SB.from('movements').select('*').order('date',{ascending:false});
+      const data=await fetchAll('movements','date',false);
       movements=(data||[]).map(r=>({id:r.id,date:r.date,locId:r.loc_id,sku:r.sku,type:r.type,cases:r.cases||0,pcs:r.pcs||0,batch:r.batch||'',expiry:r.expiry||'',party:r.party||'',ref:r.ref||'',notes:r.notes||'',adjQty:r.adj_qty||0,fromLoc:r.from_loc||'',toLoc:r.to_loc||'',driver:r.driver||'',createdBy:r.created_by||'',ts:r.ts||0}));
       setConn('live','Live · '+movements.length+' entries');
       render();
@@ -847,8 +863,16 @@ async function dbDelMov(id){
 }
 async function dbUpsertProd(p){
   if(!SB||useLocal){save();return;}
-  await SB.from('products').upsert({id:p.id,sku:p.sku,name:p.name,cat:p.cat,brand:p.brand||null,
+  const {error}=await SB.from('products').upsert({id:p.id,sku:p.sku,name:p.name,cat:p.cat,brand:p.brand||null,
     ppc:p.ppc,reorder:p.reorder,cost:p.cost,sell:p.sell||0,sell_pc:p.sellPc||0,expiry:p.expiry||null,shelf_life:p.shelfLife||0,hs_code:p.hsCode||null});
+  if(error){
+    console.error('Product save error:',error.message);
+    if(/hs_code/i.test(error.message)||/column/i.test(error.message)){
+      // retry without hs_code so the rest still saves; warn the user to add the column
+      await SB.from('products').upsert({id:p.id,sku:p.sku,name:p.name,cat:p.cat,brand:p.brand||null,ppc:p.ppc,reorder:p.reorder,cost:p.cost,sell:p.sell||0,sell_pc:p.sellPc||0,expiry:p.expiry||null,shelf_life:p.shelfLife||0});
+      alert('⚠ HS Code could not be saved to the database.\n\nThe "hs_code" column is missing from your Supabase products table.\n\nTo fix permanently, run this in Supabase → SQL Editor:\n\nALTER TABLE products ADD COLUMN hs_code text;\n\n(The rest of the product was saved.)');
+    }
+  }
 }
 async function dbDelProd(id){
   if(!SB||useLocal){save();return;}
@@ -1782,6 +1806,20 @@ async function saveMultiOut(){
   if(!driver){msg('fo-msg','⚠ Enter Driver / Received By name',false);return;}
   if(!validLines.length){msg('fo-msg','⚠ Add at least one product with quantity',false);return;}
   const createdBy=currentUser?.name||'Unknown';
+  // ⛔ AVAILABILITY GUARD — block stock out exceeding available stock (prevents silent negative stock)
+  for(const line of validLines){
+    const ppc=getPPC(line.sku);
+    const totalPcs=line.cases*ppc+(+line.pcs||0);
+    if(line.expiry){
+      const exp=line.expiry==='__none__'?'':line.expiry;
+      const bs=getBatchStock(locId,line.sku).find(b=>(b.expiry||'')===exp);
+      const avail=bs?bs.qty:0;
+      if(totalPcs>avail){msg('fo-msg',`⛔ ${esc(line.sku)}: cannot stock out ${cpStr(totalPcs,ppc)} — only ${cpStr(avail,ppc)} available in this batch (expiry ${exp?fD(exp):'—'}). If the physical count differs, correct it first via Stock Adjustment.`,false);return;}
+    }else{
+      const avail=getClose(locId,line.sku);
+      if(totalPcs>avail){msg('fo-msg',`⛔ ${esc(line.sku)}: cannot stock out ${cpStr(totalPcs,ppc)} — only ${cpStr(Math.max(0,avail),ppc)} available at this location. If the physical count differs, correct it first via Stock Adjustment.`,false);return;}
+    }
+  }
   let batchCount=0;
   for(const line of validLines){
     const ppc=getPPC(line.sku);
@@ -2812,7 +2850,7 @@ async function loadSalesFromDB(){
   try{
     const[cR,iR,aR]=await Promise.all([
       SB.from('customers').select('*').order('name'),
-      SB.from('invoices').select('*').order('date',{ascending:false}),
+      fetchAll('invoices','date',false).then(rows=>({data:rows})),
       SB.from('audit_log').select('*').order('ts',{ascending:false}).limit(500),
     ]);
     customers=(cR.data||[]).map(r=>({id:r.id,name:r.name,type:r.type,trn:r.trn||'',phone:r.phone||'',email:r.email||'',address:r.address||'',emirate:r.emirate||'',source:r.source||'',discount:+r.discount||0,specialPrice:r.special_price||'',branches:r.branches||[],bldg:r.bldg||'',street:r.street||'',city:r.city||'',postal:r.postal||'',country:r.country||'AE',notes:r.notes||'',createdBy:r.created_by||'',createdAt:r.created_at}));
@@ -4200,7 +4238,7 @@ function loadRet(){returns=JSON.parse(localStorage.getItem('wms_returns')||'[]')
 async function loadReturnsFromDB(){
   if(!SB)return;
   try{
-    const{data}=await SB.from('returns').select('*').order('date',{ascending:false});
+    const data=await fetchAll('returns','date',false);
     returns=(data||[]).map(r=>({id:r.id,grvNo:r.grv_no,date:r.date,origInvNo:r.orig_inv_no||'',customerId:r.customer_id||'',customerName:r.customer_name,branch:r.branch||'',trn:r.trn||'',reason:r.reason||'',locId:r.loc_id||'',items:r.items||[],subtotal:+r.subtotal||0,vat:+r.vat||0,total:+r.total||0,createdBy:r.created_by||'',ts:r.ts||0,cancelled:!!r.cancelled,einvStatus:r.einv_status||'none',einvXml:r.einv_xml||'',einvUuid:r.einv_uuid||'',einvSubmittedAt:r.einv_submitted_at?new Date(r.einv_submitted_at).getTime():null}));
   }catch(e){console.error('returns load:',e);}
 }
@@ -4401,7 +4439,7 @@ async function dbInsertDN(d){if(!SB||useLocal){saveDN();return;}await SB.from('d
 async function dbUpdateDN(d){if(!SB||useLocal){saveDN();return;}await SB.from('delivery_notes').update({date:d.date,customer_name:d.customerName,branch:d.branch||null,employee:d.employee||null,lpo:d.lpo||null,narration:d.narration||null,loc_id:d.locId||null,items:d.items,cancelled:!!d.cancelled}).eq('id',d.id);}
 function saveDN(){if(typeof DEMO_MODE!=='undefined'&&DEMO_MODE){demoSave();return;}localStorage.setItem('wms_deliveries',JSON.stringify(deliveries));}
 function loadDN(){deliveries=JSON.parse(localStorage.getItem('wms_deliveries')||'[]');}
-async function loadDNFromDB(){if(!SB)return;try{const{data}=await SB.from('delivery_notes').select('*').order('date',{ascending:false});deliveries=(data||[]).map(r=>({id:r.id,dnNo:r.dn_no,date:r.date,customerId:r.customer_id||'',customerName:r.customer_name,branch:r.branch||'',employee:r.employee||'',lpo:r.lpo||'',narration:r.narration||'',locId:r.loc_id||'',items:r.items||[],createdBy:r.created_by||'',ts:r.ts||0,cancelled:!!r.cancelled}));}catch(e){console.error('DN load:',e);}}
+async function loadDNFromDB(){if(!SB)return;try{const data=await fetchAll('delivery_notes','date',false);deliveries=(data||[]).map(r=>({id:r.id,dnNo:r.dn_no,date:r.date,customerId:r.customer_id||'',customerName:r.customer_name,branch:r.branch||'',employee:r.employee||'',lpo:r.lpo||'',narration:r.narration||'',locId:r.loc_id||'',items:r.items||[],createdBy:r.created_by||'',ts:r.ts||0,cancelled:!!r.cancelled}));}catch(e){console.error('DN load:',e);}}
 function nextDnNo(){const yr=new Date().getFullYear();const nums=deliveries.filter(d=>d.dnNo&&d.dnNo.includes('-'+yr+'-')).map(d=>parseInt(d.dnNo.split('-').pop())||0);return 'DN-'+yr+'-'+String((nums.length?Math.max(...nums):0)+1).padStart(4,'0');}
 let dnHdr={date:'',cust:'',branch:'',emp:'',lpo:'',narration:'',loc:''};
 function snapDN(){const g=id=>document.getElementById(id);if(g('dn-date'))dnHdr={date:g('dn-date').value,cust:g('dn-cust')?.value||'',branch:g('dn-branch')?.value||'',emp:g('dn-emp')?.value||'',lpo:g('dn-lpo')?.value||'',narration:g('dn-narration')?.value||'',loc:g('dn-loc')?.value||''};return dnHdr;}
@@ -4635,7 +4673,7 @@ async function dbUpdatePayment(p){
 }
 async function loadPaymentsFromDB(){
   if(!SB)return;
-  try{const{data}=await SB.from('payments').select('*').order('date',{ascending:false});
+  try{const data=await fetchAll('payments','date',false);
     payments=(data||[]).map(r=>({id:r.id,rcptNo:r.rcpt_no,date:r.date,customerId:r.customer_id||'',customerName:r.customer_name,amount:+r.amount||0,method:r.method||'',ref:r.ref||'',notes:r.notes||'',againstInv:r.against_inv||'',collectedBy:r.collected_by||'',createdBy:r.created_by||'',ts:r.ts||0,cancelled:!!r.cancelled}));
   }catch(e){console.error('payments load:',e);}
 }
@@ -5518,7 +5556,7 @@ async function dbInsertPetty(e){
 async function dbDeletePetty(id){if(!SB||useLocal){savePetty();return;}await SB.from('petty_cash').delete().eq('id',id);}
 async function loadPettyFromDB(){
   if(!SB)return;
-  try{const{data}=await SB.from('petty_cash').select('*').order('date',{ascending:false});
+  try{const data=await fetchAll('petty_cash','date',false);
     pettyCash=(data||[]).map(r=>{const d=r.description||'';const fromCash=d.startsWith('[from-cash] ');return{id:r.id,date:r.date,type:r.type,amount:+r.amount||0,category:r.category||'',desc:fromCash?d.replace('[from-cash] ',''):d,fromCash,by:r.created_by||'',ts:r.ts||0};});
   }catch(e){console.error('petty load:',e);}
 }
@@ -6495,7 +6533,7 @@ async function dbInsertExp(e){
 async function dbDelExp(id){if(!SB||useLocal){saveExp();return;}await SB.from('expenses').delete().eq('id',id);}
 async function loadExpFromDB(){
   if(!SB)return;
-  try{const{data}=await SB.from('expenses').select('*').order('date',{ascending:false});
+  try{const data=await fetchAll('expenses','date',false);
     expenses=(data||[]).map(r=>{let d=r.description||'',payStatus='paid',dueDate='';const m=d.match(/^\[unpaid(?::([\d-]+))?\]\s*/);if(m){payStatus='unpaid';dueDate=m[1]||'';d=d.replace(m[0],'');}return{id:r.id,date:r.date,category:r.category||'',desc:d,vendor:r.vendor||'',gross:+r.gross||0,hasVat:!!r.has_vat,vatAmount:+r.vat_amount||0,net:+r.net||0,method:r.method||'',ref:r.ref||'',payStatus,dueDate,by:r.created_by||'',ts:r.ts||0};});
   }catch(e){console.error('expenses load:',e);}
 }
@@ -6667,7 +6705,7 @@ async function dbDelBankTxn(id){if(!SB||useLocal){saveBank();return;}await SB.fr
 async function dbDelBankBySource(source,sourceId){if(!SB||useLocal){return;}await SB.from('bank_txns').delete().eq('source',source).eq('source_id',sourceId);}
 async function loadBankFromDB(){
   if(!SB)return;
-  try{const{data}=await SB.from('bank_txns').select('*').order('date',{ascending:true});
+  try{const data=await fetchAll('bank_txns','date',true);
     bankTxns=(data||[]).map(r=>({id:r.id,date:r.date,direction:r.direction,amount:+r.amount||0,category:r.category||'',method:r.method||'',ref:r.ref||'',party:r.party||'',notes:r.notes||'',source:r.source||'manual',sourceId:r.source_id||'',by:r.created_by||'',ts:r.ts||0}));
     // opening balance lives in a special bank_txn with source='opening'
     const ob=bankTxns.find(t=>t.source==='opening');
